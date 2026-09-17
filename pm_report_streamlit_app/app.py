@@ -3,13 +3,101 @@ from datetime import date, datetime
 
 from pm_pipeline.pipeline import generate_report
 
-st.set_page_config(page_title="PM Weekly Requirement Report", page_icon="📦", layout="centered")
+st.set_page_config(page_title="PM Weekly Requirement Report", page_icon="📦", layout="wide")
 
-st.title("📦 PM Weekly Requirement Report Generator")
-st.caption(
-    "Upload the 4 files that change every run. Everything else (Active FG list, "
-    "BOM, Can Pack master, Nav Item Code mapping, MOQ tiers, formatting template) "
-    "is bundled with this app."
+st.markdown(
+    """
+    <style>
+    :root {
+        --jay-gold-light: #FDE68A;
+        --jay-gold: #F2B705;
+        --jay-gold-dark: #B8860B;
+        --jay-black: #111111;
+        --jay-black-soft: #1C1C1C;
+    }
+
+    .block-container {
+        padding-top: 2rem;
+        max-width: 1100px;
+    }
+
+    .jay-hero {
+        background: radial-gradient(ellipse at center, #2a2a2a 0%, var(--jay-black) 75%);
+        border: 1px solid var(--jay-gold-dark);
+        border-radius: 18px;
+        padding: 2rem 2.25rem;
+        margin-bottom: 1.75rem;
+        box-shadow: 0 4px 24px rgba(0, 0, 0, 0.45);
+    }
+
+    .jay-hero h1 {
+        margin: 0;
+        font-size: 2rem;
+        font-weight: 800;
+        letter-spacing: 0.02em;
+        background: linear-gradient(180deg, var(--jay-gold-light) 0%, var(--jay-gold) 45%, var(--jay-gold-dark) 100%);
+        -webkit-background-clip: text;
+        background-clip: text;
+        color: transparent;
+    }
+
+    .jay-hero p {
+        margin: 0.5rem 0 0 0;
+        color: #C9C9C9;
+        font-size: 0.95rem;
+        line-height: 1.5;
+    }
+
+    .jay-section-label {
+        display: inline-block;
+        font-size: 0.8rem;
+        font-weight: 700;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        color: var(--jay-black);
+        background: linear-gradient(135deg, var(--jay-gold-light), var(--jay-gold));
+        padding: 0.2rem 0.7rem;
+        border-radius: 999px;
+        margin-bottom: 0.6rem;
+    }
+
+    div[data-testid="stExpander"] {
+        border: 1px solid #333333;
+        border-radius: 12px;
+        background-color: var(--jay-black-soft);
+    }
+
+    div[data-testid="stFileUploaderDropzone"] {
+        border: 1.5px dashed var(--jay-gold-dark);
+        border-radius: 10px;
+        background-color: var(--jay-black-soft);
+    }
+
+    .stButton > button, .stDownloadButton > button {
+        border-radius: 10px;
+        font-weight: 700;
+        border: 1px solid var(--jay-gold-dark);
+    }
+
+    div[data-testid="stProgress"] div[role="progressbar"] > div {
+        background: linear-gradient(90deg, var(--jay-gold-dark), var(--jay-gold));
+    }
+
+    hr {
+        border-color: #333333 !important;
+    }
+    </style>
+
+    <div class="jay-hero">
+        <h1>📦 PM Weekly Requirement Report Generator</h1>
+        <p>
+            Upload the 4 files that change every run. Everything else (Active FG list,
+            BOM, Can Pack master, Nav Item Code mapping, MOQ tiers, formatting template)
+            is bundled with this app.
+        </p>
+    </div>
+    """,
+    unsafe_allow_html=True,
 )
 
 with st.expander("What this does", expanded=False):
@@ -28,20 +116,24 @@ with st.expander("What this does", expanded=False):
       FG's own ratio), and the raw **Export/Domestic orders in M4** sheets.
     """)
 
-st.subheader("1. Upload today's files")
+st.markdown('<span class="jay-section-label">Step 1</span>', unsafe_allow_html=True)
+st.subheader("Upload today's files")
 
-col1, col2 = st.columns(2)
-with col1:
-    export_file = st.file_uploader("Export Order Status", type=["xlsx"], key="export")
-    pending_po_file = st.file_uploader("Pending PO", type=["xlsx"], key="po")
-with col2:
-    domestic_file = st.file_uploader("Domestic Order Status", type=["xlsx"], key="domestic")
-    stock_file = st.file_uploader("Stock Report Summary", type=["xlsx"], key="stock")
+with st.container(border=True):
+    col1, col2 = st.columns(2)
+    with col1:
+        export_file = st.file_uploader("Export Order Status", type=["xlsx"], key="export")
+        pending_po_file = st.file_uploader("Pending PO", type=["xlsx"], key="po")
+    with col2:
+        domestic_file = st.file_uploader("Domestic Order Status", type=["xlsx"], key="domestic")
+        stock_file = st.file_uploader("Stock Report Summary", type=["xlsx"], key="stock")
 
-st.subheader("2. Report date")
+st.markdown('<span class="jay-section-label">Step 2</span>', unsafe_allow_html=True)
+st.subheader("Report date")
 report_date = st.date_input("Treat this as 'today' for the report", value=date.today())
 
-st.subheader("3. Generate")
+st.markdown('<span class="jay-section-label">Step 3</span>', unsafe_allow_html=True)
+st.subheader("Generate")
 all_uploaded = all([export_file, domestic_file, pending_po_file, stock_file])
 
 if not all_uploaded:

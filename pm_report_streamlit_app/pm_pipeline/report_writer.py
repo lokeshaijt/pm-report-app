@@ -192,6 +192,7 @@ def write_monthly_summary_sheet(wb, results, MONTHS, nav_map, generated_on):
     title = f"PM Requirements (Monthly) - {_month_label(MONTHS[0])} to {_month_label(MONTHS[-1])}"
     label_fn = lambda m: _month_label(m)
     _write_weekly_or_monthly_summary(ws, results, MONTHS, label_fn, nav_map, title, generated_on)
+    ws.sheet_state = "hidden"
 
 
 # ---------------------------------------------------------------------------

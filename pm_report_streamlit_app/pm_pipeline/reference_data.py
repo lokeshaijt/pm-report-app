@@ -10,10 +10,12 @@ Loads the reference data that ships *inside* the app repo and rarely changes:
 If your Active FG list, BOM, Can Pack master, or Nav mapping change, just replace
 the corresponding file in data/ and redeploy - no code changes needed.
 """
+import os
+
 import openpyxl
 from .utils import norm, norm_disp
 
-DATA_DIR = "data"
+DATA_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data")
 
 MOQ_TIERS = {
     "CFC": [250, 500, 1000, 3000, 5000, 10000],

@@ -1,7 +1,14 @@
 """
 Writes every sheet of the final report, using data/Report_Template.xlsx as the
-formatting source (freeze panes, colors, column widths, conditional formatting)
-so visual output never drifts from the approved format - only the data changes.
+formatting source (freeze panes, colors, column widths, conditional formatting,
+sheet visibility) so visual output never drifts from the approved format -
+only the data changes.
+
+Sheet visibility is intentionally left untouched wherever this module doesn't
+explicitly set it: the template's own hidden/visible state for each sheet
+(confirmed 19-Sep-2026: FG & PM STOCK, PM Monthly Summary, Orders, and MOQ
+hidden; everything else visible; Stock Report Summary and Pending PO hidden)
+carries straight through.
 """
 import copy
 import re
@@ -15,7 +22,6 @@ from .weeks import month_label as _month_label
 
 RED_FONT = openpyxl.styles.Font(color="FF9C0006")
 RED_FILL = openpyxl.styles.PatternFill(start_color="FFFFC7CE", end_color="FFFFC7CE", fill_type="solid")
-NUMFMT = '#,##0;\\-#,##0;"-"'
 
 
 def _clear_conditional_formatting(ws):
@@ -44,6 +50,30 @@ def _style_ref(ws, row, max_col):
 
 def load_template():
     return openpyxl.load_workbook(f"{DATA_DIR}/Report_Template.xlsx")
+
+
+def _true_last_row(ws, check_col, start_row):
+    last = start_row
+    for r in range(start_row, ws.max_row + 1):
+        if ws.cell(r, check_col).value not in (None, ""):
+            last = r
+    return last
+
+
+def _true_last_col(ws, header_row):
+    last = 1
+    for c in range(1, ws.max_column + 1):
+        if ws.cell(header_row, c).value not in (None, ""):
+            last = c
+    return last
+
+
+def fix_autofilter(ws, header_row, check_col):
+    """Set the AutoFilter to span the full header-through-last-row,
+    first-through-last-column extent, so every column gets a working dropdown."""
+    last_col = _true_last_col(ws, header_row)
+    last_row = _true_last_row(ws, check_col, header_row + 1)
+    ws.auto_filter.ref = f"A{header_row}:{get_column_letter(last_col)}{last_row}"
 
 
 # ---------------------------------------------------------------------------
@@ -79,12 +109,12 @@ def write_canpack_sheet(wb, rows):
 
     _clear_conditional_formatting(ws)
     _add_negative_highlight(ws, [9], TEMPLATE_ROW, new_max_row)
+    fix_autofilter(ws, 1, 1)
 
 
 # ---------------------------------------------------------------------------
 def _write_weekly_or_monthly_summary(ws, results, buckets, bucket_label_fn, nav_map,
                                       title, generated_on):
-    """Shared implementation for PM Week Wise Summary and PM Monthly Summary."""
     OLD_MAX_COL = ws.max_column
     OLD_MAX_ROW = ws.max_row
     header_style = _style_ref(ws, 3, OLD_MAX_COL)
@@ -174,6 +204,7 @@ def _write_weekly_or_monthly_summary(ws, results, buckets, bucket_label_fn, nav_
     _clear_conditional_formatting(ws)
     se_cols = [8] + [13 + 4 * i for i in range(len(buckets))]
     _add_negative_highlight(ws, se_cols, 4, new_max_row)
+    fix_autofilter(ws, 3, 2)
 
 
 def write_week_summary_sheet(wb, results, WEEKS, WEEK_BOUNDS, nav_map, generated_on):
@@ -185,14 +216,10 @@ def write_week_summary_sheet(wb, results, WEEKS, WEEK_BOUNDS, nav_map, generated
 
 
 def write_monthly_summary_sheet(wb, results, MONTHS, nav_map, generated_on):
-    if "PM Monthly Summary" not in wb.sheetnames:
-        idx = wb.sheetnames.index("PM Week Wise Summary") + 1
-        wb.create_sheet("PM Monthly Summary", idx)
     ws = wb["PM Monthly Summary"]
     title = f"PM Requirements (Monthly) - {_month_label(MONTHS[0])} to {_month_label(MONTHS[-1])}"
     label_fn = lambda m: _month_label(m)
     _write_weekly_or_monthly_summary(ws, results, MONTHS, label_fn, nav_map, title, generated_on)
-    ws.sheet_state = "hidden"
 
 
 # ---------------------------------------------------------------------------
@@ -216,7 +243,7 @@ def write_shortfall_sheet(wb, consolidated, WEEKS, WEEK_BOUNDS, nav_map):
     NW = len(WEEKS)
     SF_START = 7
     ISSUE_START = SF_START + NW
-    ARRIVE_START = ISSUE_START + NW + 1  # spacer kept before Arrive block
+    ARRIVE_START = ISSUE_START + NW + 1
     NEW_MAX_COL = ARRIVE_START + NW - 1
 
     title_fill = openpyxl.styles.PatternFill("solid", fgColor="FFF4B183")
@@ -296,6 +323,8 @@ def write_shortfall_sheet(wb, consolidated, WEEKS, WEEK_BOUNDS, nav_map):
             cell.fill = openpyxl.styles.PatternFill(fill_type=None)
             cell.font, cell.border = openpyxl.styles.Font(), openpyxl.styles.Border()
 
+    fix_autofilter(ws, 2, 2)
+
 
 # ---------------------------------------------------------------------------
 def write_laminates_sheet(wb, results, MONTHS, nav_map):
@@ -343,6 +372,42 @@ def write_laminates_sheet(wb, results, MONTHS, nav_map):
     _clear_conditional_formatting(ws)
     se_cols = [7] + [12 + 4 * i for i in range(len(MONTHS))]
     _add_negative_highlight(ws, se_cols, TEMPLATE_ROW, new_max_row)
+    fix_autofilter(ws, 3, 2)
+
+
+# ---------------------------------------------------------------------------
+def write_possible_error_sheet(wb, rows):
+    ws = wb["Possible Error"]
+    OLD_MAX_ROW = ws.max_row
+    OLD_MAX_COL = ws.max_column
+    header_style = _style_ref(ws, 1, OLD_MAX_COL)
+    data_border = copy.copy(ws.cell(2, 1).border) if OLD_MAX_ROW >= 2 else openpyxl.styles.Border()
+
+    for r in range(1, OLD_MAX_ROW + 1):
+        for c in range(1, OLD_MAX_COL + 1):
+            ws.cell(r, c).value = None
+
+    headers = ["Nav Doc No", "Buyer requested shipment date", "FG name", "Order Qty", "Issue"]
+    for i, h in enumerate(headers, start=1):
+        c = ws.cell(1, i, h)
+        src = header_style.get(i, header_style[1])
+        c.font, c.fill, c.alignment, c.border = src["font"], src["fill"], src["alignment"], src["border"]
+
+    row_idx = 2
+    for r in rows:
+        ws.cell(row_idx, 1, r["nav_doc_no"]).border = data_border
+        d_cell = ws.cell(row_idx, 2, r["ship_date"])
+        d_cell.border = data_border
+        if r["ship_date"] is not None:
+            d_cell.number_format = "DD-MM-YYYY"
+        ws.cell(row_idx, 3, r["fg_name"]).border = data_border
+        ws.cell(row_idx, 4, round(r["order_qty"], 4)).border = data_border
+        ws.cell(row_idx, 5, r["issue"]).border = data_border
+        row_idx += 1
+
+    new_max_row = max(row_idx - 1, 1)
+    fix_autofilter(ws, 1, 3)
+    return new_max_row - 1
 
 
 # ---------------------------------------------------------------------------
@@ -362,7 +427,8 @@ def _parse_date_str(s):
 
 def write_m4_sheet(wb, sheet_name, src_file):
     """Rebuilds an Export/Domestic 'orders in M4' sheet from scratch (avoids
-    any leftover data from a differently-sized prior run)."""
+    leftover data from a differently-sized prior run), preserving whichever
+    columns are hidden in the source file that day."""
     idx = wb.sheetnames.index(sheet_name)
     del wb[sheet_name]
     ws = wb.create_sheet(sheet_name, idx)
@@ -399,10 +465,13 @@ def write_m4_sheet(wb, sheet_name, src_file):
         ws.merge_cells(str(rng))
     for k, v in src_ws_f.column_dimensions.items():
         ws.column_dimensions[k].width = v.width
+        if v.hidden:
+            ws.column_dimensions[k].hidden = True
 
     max_row = ws.max_row
     rule = CellIsRule(operator="lessThan", formula=["$O7"], stopIfTrue=False, font=RED_FONT, fill=RED_FILL)
     ws.conditional_formatting.add(f"P7:P{max_row}", rule)
+    fix_autofilter(ws, 6, 10)
 
 
 def write_orders_sheet(wb, src_file, generated_on):
@@ -460,3 +529,37 @@ def write_orders_sheet(wb, src_file, generated_on):
     ws.column_dimensions["B"].width = 20
     ws.column_dimensions["D"].width = 16
     ws.column_dimensions["H"].width = 45
+    fix_autofilter(ws, 3, 8)
+
+
+# ---------------------------------------------------------------------------
+def write_raw_hidden_sheet(wb, dest_sheet_name, src_path):
+    """Adds a hidden, full raw copy of a source workbook (Stock Report Summary
+    or Pending PO) - visible only if someone explicitly unhides it in Excel."""
+    src_wb = openpyxl.load_workbook(src_path, data_only=True)
+    created = []
+    for sn in src_wb.sheetnames:
+        src_ws = src_wb[sn]
+        tab_name = dest_sheet_name if len(src_wb.sheetnames) == 1 else f"{dest_sheet_name} ({sn})"
+        tab_name = tab_name[:31]
+        if tab_name in wb.sheetnames:
+            del wb[tab_name]
+        ws = wb.create_sheet(tab_name)
+        for row in src_ws.iter_rows():
+            for cell in row:
+                if cell.value is None:
+                    continue
+                tgt = ws.cell(cell.row, cell.column)
+                tgt.value = cell.value
+                tgt.font = copy.copy(cell.font)
+                tgt.fill = copy.copy(cell.fill)
+                tgt.border = copy.copy(cell.border)
+                tgt.alignment = copy.copy(cell.alignment)
+                tgt.number_format = cell.number_format
+        for rng in src_ws.merged_cells.ranges:
+            ws.merge_cells(str(rng))
+        for k, v in src_ws.column_dimensions.items():
+            ws.column_dimensions[k].width = v.width
+        ws.sheet_state = "hidden"
+        created.append(tab_name)
+    return created

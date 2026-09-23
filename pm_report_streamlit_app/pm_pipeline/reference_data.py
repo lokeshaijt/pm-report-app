@@ -1,14 +1,22 @@
 """
 Loads the reference data that ships *inside* the app repo and rarely changes:
-  - Active FG list
-  - Exploded BOM (new format: ITEM TYPE / ITEM GROUP built into the sheet)
+  - Exploded BOM (new format: ITEM TYPE / ITEM GROUP built into the sheet) -
+    the FG universe is EVERY FG in this file; there is no Active FG list filter.
+  - Exploded_BOM_Supplemental.xlsx - a standing merge of extra brands whose main-BOM
+    entries were missing (GV, INDUS, JUNGLE KING, LALKUMBH, PREMIER, added 19-Sep-2026).
+    This file has no ITEM TYPE/ITEM GROUP columns, so new component names get their
+    category/type inferred from the naming convention (see infer_meta below).
   - Can Pack master FG+Brand list
   - Nav Item Code mapping
-  - The fixed 38-item Laminated sheet list
+  - The fixed Laminated sheet list (40 items as of 21-Sep-2026: 27 LAMINATED ROLL +
+    11 POUCH TEA INDIA CHAI MMNTS + POUCH LAMINATED TEA INDIA 3 LB + 2 POLY TEA INDIA)
   - MOQ tier table
 
-If your Active FG list, BOM, Can Pack master, or Nav mapping change, just replace
-the corresponding file in data/ and redeploy - no code changes needed.
+If the Can Pack master or Nav mapping change, just replace the corresponding file in
+data/ and redeploy - no code changes needed. If the main BOM changes, replace
+Exploded_BOM.xlsx. The person can also upload a one-off supplemental BOM at runtime
+through the app (for new/missing FGs flagged on the Possible Error sheet) without
+needing a redeploy - see pm_universe.py.
 """
 import os
 
@@ -33,8 +41,6 @@ MOQ_TIERS = {
     "POUCH GARANT": [5000, 10000, 25000, 50000],
 }
 
-# Fixed list of items shown on the Laminates sheet, using a flat 300-unit MOQ
-# tier regardless of their normal category.
 LAMINATED_SHEET_ITEMS_DISPLAY = [
     "LAMINATED ROLL AKOUNA COFFEE 3 IN 1", "LAMINATED ROLL AKOUNA INSTANT COFFEE (1.5GMS)",
     "LAMINATED ROLL AKOUNA PREMIUM CHOCO GRANULE", "LAMINATED ROLL AL FINA CAPPUCCINO 3 IN 1",
@@ -56,29 +62,12 @@ LAMINATED_SHEET_ITEMS_DISPLAY = [
     "POUCH TEA INDIA 10 CHAI MMNTS INST UNSWTND CRDM", "POUCH TEA INDIA 10 CHAI MMNTS INST UNSWTND GNGR",
     "POUCH TEA INDIA 10 CHAI MMNTS INST UNSWTND M", "POUCH TEA INDIA 10 CHAI MMNTS LEMON GRASS CL",
     "POUCH TEA INDIA 10 CHAI MMNTS SAFFRON CL",
+    "POLY TEA INDIA 1 LBS", "POLY TEA INDIA 2 LBS",
 ]
 LAMINATED_SHEET_ITEMS = {norm(n) for n in LAMINATED_SHEET_ITEMS_DISPLAY}
 
 
-def load_active_fgs(path=f"{DATA_DIR}/Active_FGs.xlsx"):
-    wb = openpyxl.load_workbook(path, data_only=True, read_only=True)
-    ws = wb["Sheet1"]
-    active = set()
-    for row in ws.iter_rows(min_row=2, values_only=True):
-        if row[0]:
-            active.add(norm(row[0]))
-    return active
-
-
 def load_bom(path=f"{DATA_DIR}/Exploded_BOM.xlsx"):
-    """
-    Returns:
-      raw_rows: list of (fg_name, item_name, qty)   [one per BOM line, every FG]
-      item_meta: {item_key: (item_group, item_type)}   e.g. (PM-SPECIFIC, CFC)
-      fg_brand: {fg_key: brand}
-      uom_map: {item_key: uom}
-      fg_cfc / fg_ctn: {fg_key: [(item_name, qty), ...]}  (for Can Pack, every FG)
-    """
     wb = openpyxl.load_workbook(path, data_only=True, read_only=True)
     ws = wb["Exploded BOM"]
     raw_rows = []
@@ -88,7 +77,7 @@ def load_bom(path=f"{DATA_DIR}/Exploded_BOM.xlsx"):
     fg_cfc, fg_ctn = {}, {}
 
     it = ws.iter_rows(min_row=2, values_only=True)
-    next(it)  # header row
+    next(it)
     for row in it:
         fg, item, item_type, item_group, qty, uom, brand = (
             row[1], row[3], row[4], row[5], row[6], row[7], row[8]
@@ -102,7 +91,7 @@ def load_bom(path=f"{DATA_DIR}/Exploded_BOM.xlsx"):
             continue
         itemk = norm(item)
         if itemk not in item_meta:
-            item_meta[itemk] = (item_group, item_type)  # (ITEM GROUP, ITEM TYPE)
+            item_meta[itemk] = (item_group, item_type)
         if itemk not in uom_map and uom:
             uom_map[itemk] = uom
         raw_rows.append((fg, item, qty))
@@ -112,6 +101,53 @@ def load_bom(path=f"{DATA_DIR}/Exploded_BOM.xlsx"):
             fg_ctn.setdefault(fgk, []).append((norm_disp(item), qty))
 
     return raw_rows, item_meta, fg_brand, uom_map, fg_cfc, fg_ctn
+
+
+def infer_meta(item_name):
+    """
+    Best-effort (item_group, item_type) inference for a component name with no
+    explicit ITEM TYPE/ITEM GROUP columns (used for the bundled supplemental BOM,
+    and any one-off supplemental BOM uploaded at runtime). Matches the exact
+    conventions used in the main BOM. Returns (None, None) when unrecognized -
+    the item then shows as "(unmatched)" rather than being misclassified.
+    """
+    n = item_name.strip().upper()
+    if n.startswith("CFC "):
+        return ("PM-SPECIFIC", "CFC")
+    if n.startswith("CTN "):
+        return ("PM-SPECIFIC", "CTN")
+    if n.startswith("ENV "):
+        return ("PM-SPECIFIC", "ENV")
+    if n.startswith("TAG "):
+        return ("PM-SPECIFIC", "TAG")
+    if n.startswith("BLEND "):
+        return ("BLEND", "BLENDB")
+    if n.startswith("LAMINATED ROLL"):
+        return ("PM-SPECIFIC", "LAMINATED-ROLLS")
+    if n.startswith("LABEL "):
+        return ("PM-GENERIC", "LABEL")
+    return (None, None)
+
+
+def load_supplemental_bom(path):
+    """
+    Parses a supplemental BOM in the 6-column layout (FG Name, Item Name, Qty,
+    Uom, Brand, FG Uom - no ITEM TYPE/ITEM GROUP columns). Used both for the
+    bundled standing merge and for any one-off file uploaded at runtime.
+    """
+    wb = openpyxl.load_workbook(path, data_only=True, read_only=True)
+    ws = wb[wb.sheetnames[0]]
+    raw_rows = []
+    fg_brand = {}
+    for row in ws.iter_rows(min_row=3, values_only=True):
+        fg, item, qty, uom, brand = row[0], row[1], row[2], row[3], row[4]
+        if fg is None or item is None:
+            continue
+        fgk = norm(fg)
+        if brand and fgk not in fg_brand:
+            fg_brand[fgk] = brand
+        raw_rows.append((fg, item, qty))
+    return raw_rows, fg_brand
 
 
 def load_canpack_master(path=f"{DATA_DIR}/Can_Pack_Master.xlsx"):
@@ -139,7 +175,6 @@ def load_nav_map(path=f"{DATA_DIR}/Nav_Mapping.xlsx"):
 
 
 def fmt_item_type(t):
-    """PM-SPECIFIC -> PM - SPECIFIC, PM-GENERIC -> PM - GENERIC, else unchanged."""
     if t is None:
         return ""
     if t == "PM-SPECIFIC":
@@ -150,7 +185,6 @@ def fmt_item_type(t):
 
 
 def suggested_moq(category, item_name, shortfall_amt):
-    """MOQ tier lookup, with the Laminated-sheet and Pouch-Garant overrides."""
     if shortfall_amt is None or shortfall_amt <= 0:
         return None
     name_u = norm(item_name)

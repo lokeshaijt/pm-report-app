@@ -133,11 +133,24 @@ def _write_weekly_or_monthly_summary(ws, results, buckets, bucket_label_fn, nav_
     ws.cell(2, 1).value = f"Report Generated on {generated_on}"
     ws.cell(2, 1).font = openpyxl.styles.Font(bold=True, italic=True, size=9)
 
+    # Weeks alternate between two color pairs so adjacent weeks are easy to
+    # tell apart: even weeks use blue header / maroon subheader, odd weeks
+    # use green header / purple subheader (theme-based, "Darker 25%" tint,
+    # matching the reference report's manually-applied palette).
     week_font = openpyxl.styles.Font(name="Calibri", size=10, bold=True, color="FFFFFFFF")
-    week_fill = openpyxl.styles.PatternFill("solid", fgColor="FF2E75B6")
+    subheader_font = openpyxl.styles.Font(name="Calibri", size=10, bold=True, color="FFFFFFFF")
     week_align = openpyxl.styles.Alignment(horizontal="center", vertical="center", wrap_text=True)
+    WEEK_FILLS = [
+        openpyxl.styles.PatternFill("solid", fgColor="FF2E75B6"),
+        openpyxl.styles.PatternFill("solid", fgColor=openpyxl.styles.colors.Color(theme=6, tint=-0.249977111117893)),
+    ]
+    SUBHEADER_FILLS = [
+        openpyxl.styles.PatternFill("solid", fgColor=openpyxl.styles.colors.Color(theme=5, tint=-0.249977111117893)),
+        openpyxl.styles.PatternFill("solid", fgColor=openpyxl.styles.colors.Color(theme=7, tint=-0.249977111117893)),
+    ]
     for i, b in enumerate(buckets):
         c0 = start_col + i * 4
+        week_fill = WEEK_FILLS[i % 2]
         ws.merge_cells(start_row=2, start_column=c0, end_row=2, end_column=c0 + 3)
         cell = ws.cell(2, c0); cell.value = bucket_label_fn(b)
         cell.font, cell.fill, cell.alignment = week_font, week_fill, week_align
@@ -153,10 +166,12 @@ def _write_weekly_or_monthly_summary(ws, results, buckets, bucket_label_fn, nav_
     subheaders = ["Opening Stock", "Pending Delivery", "Planned Consum", "Short / Excess"]
     for i in range(len(buckets)):
         c0 = start_col + i * 4
+        subheader_fill = SUBHEADER_FILLS[i % 2]
         for j, sh in enumerate(subheaders):
             cell = ws.cell(3, c0 + j); cell.value = sh
             src = header_style[10 + j]
-            cell.font, cell.fill, cell.border, cell.alignment = src["font"], src["fill"], src["border"], src["alignment"]
+            cell.font, cell.fill = subheader_font, subheader_fill
+            cell.border, cell.alignment = src["border"], src["alignment"]
 
     def apply_data(cell, col):
         t = data_style[col]
@@ -250,13 +265,13 @@ def write_shortfall_sheet(wb, consolidated, WEEKS, WEEK_BOUNDS, nav_map):
     ARRIVE_START = ISSUE_START + NW
     NEW_MAX_COL = ARRIVE_START + NW - 1
 
-    # Each block gets its own hue family (blue / green / purple) so the three
-    # week-blocks are distinguishable at a glance; within a block, the fill
-    # alternates every other week so adjacent weeks don't blend together.
+    # Each block gets its own solid color (theme-based, "Darker 25%" tint) so
+    # the three week-blocks are distinguishable at a glance, matching the
+    # reference report's palette.
     BLOCK_THEMES = {
-        "sf":     {"title": "FF1F4E78", "weeks": ["FF2E75B6", "FF1F4E78"]},
-        "issue":  {"title": "FF375623", "weeks": ["FF70AD47", "FF548235"]},
-        "arrive": {"title": "FF4C2A72", "weeks": ["FF9966CC", "FF7030A0"]},
+        "sf":     {"title": "FF1F4E78", "week": openpyxl.styles.colors.Color(theme=5, tint=-0.249977111117893)},
+        "issue":  {"title": "FF375623", "week": openpyxl.styles.colors.Color(theme=7, tint=-0.249977111117893)},
+        "arrive": {"title": "FFC00000", "week": openpyxl.styles.colors.Color(theme=8, tint=-0.249977111117893)},
     }
     head_fill = openpyxl.styles.PatternFill("solid", fgColor="FF1F4E78")
     head_font = openpyxl.styles.Font(bold=True, color="FFFFFFFF")
@@ -282,8 +297,10 @@ def write_shortfall_sheet(wb, consolidated, WEEKS, WEEK_BOUNDS, nav_map):
         c = ws.cell(2, i); c.value = h; c.fill, c.font, c.alignment = head_fill, head_font, center
     for i, w in enumerate(WEEKS):
         for base, theme_key in ((SF_START, "sf"), (ISSUE_START, "issue"), (ARRIVE_START, "arrive")):
-            fill = openpyxl.styles.PatternFill("solid", fgColor=BLOCK_THEMES[theme_key]["weeks"][i % 2])
+            fill = openpyxl.styles.PatternFill("solid", fgColor=BLOCK_THEMES[theme_key]["week"])
             c = ws.cell(2, base + i); c.value = f"Week {w}"; c.fill, c.font, c.alignment = fill, head_font, center
+
+    ws.column_dimensions[get_column_letter(SF_START)].width = 7.21875
 
     SF_COLS = {w: SF_START + i for i, w in enumerate(WEEKS)}
     ISSUE_COLS = {w: ISSUE_START + i for i, w in enumerate(WEEKS)}

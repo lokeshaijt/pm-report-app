@@ -202,8 +202,9 @@ def _write_weekly_or_monthly_summary(ws, results, buckets, bucket_label_fn, nav_
             cell.font, cell.border = openpyxl.styles.Font(), openpyxl.styles.Border()
 
     _clear_conditional_formatting(ws)
-    se_cols = [8] + [13 + 4 * i for i in range(len(buckets))]
-    _add_negative_highlight(ws, se_cols, 4, new_max_row)
+    opening_cols = [start_col + 4 * i for i in range(len(buckets))]
+    se_cols = [8] + [12 + 4 * i for i in range(len(buckets))]
+    _add_negative_highlight(ws, opening_cols + se_cols, 4, new_max_row)
     fix_autofilter(ws, 3, 2)
 
 
@@ -238,38 +239,51 @@ def write_shortfall_sheet(wb, consolidated, WEEKS, WEEK_BOUNDS, nav_map):
         ws.unmerge_cells(str(rng))
     for r in range(1, OLD_MAX_ROW + 1):
         for c in range(1, OLD_MAX_COL + 3):
-            ws.cell(r, c).value = None
+            cell = ws.cell(r, c)
+            cell.value = None
+            cell.fill = openpyxl.styles.PatternFill(fill_type=None)
+            cell.font, cell.border = openpyxl.styles.Font(), openpyxl.styles.Border()
 
     NW = len(WEEKS)
     SF_START = 7
     ISSUE_START = SF_START + NW
-    ARRIVE_START = ISSUE_START + NW + 1
+    ARRIVE_START = ISSUE_START + NW
     NEW_MAX_COL = ARRIVE_START + NW - 1
 
-    title_fill = openpyxl.styles.PatternFill("solid", fgColor="FFF4B183")
-    title_font = openpyxl.styles.Font(bold=True)
+    # Each block gets its own hue family (blue / green / purple) so the three
+    # week-blocks are distinguishable at a glance; within a block, the fill
+    # alternates every other week so adjacent weeks don't blend together.
+    BLOCK_THEMES = {
+        "sf":     {"title": "FF1F4E78", "weeks": ["FF2E75B6", "FF1F4E78"]},
+        "issue":  {"title": "FF375623", "weeks": ["FF70AD47", "FF548235"]},
+        "arrive": {"title": "FF4C2A72", "weeks": ["FF9966CC", "FF7030A0"]},
+    }
     head_fill = openpyxl.styles.PatternFill("solid", fgColor="FF1F4E78")
     head_font = openpyxl.styles.Font(bold=True, color="FFFFFFFF")
+    title_font = openpyxl.styles.Font(bold=True, color="FFFFFFFF")
     center = openpyxl.styles.Alignment(horizontal="center", vertical="center")
 
     ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=6)
     ws.cell(1, 1).value = (f"PM Shortfall & PO Plan (weekly-bucketed Pending Delivery) - "
                             f"{fmt(WEEK_BOUNDS[WEEKS[0]][0])} to {fmt(WEEK_BOUNDS[WEEKS[-1]][1])}")
 
-    def block_title(t, start, end):
+    def block_title(t, start, end, theme_key):
         ws.merge_cells(start_row=1, start_column=start, end_row=1, end_column=end)
-        c = ws.cell(1, start); c.value = t; c.fill, c.font, c.alignment = title_fill, title_font, center
+        c = ws.cell(1, start); c.value = t
+        c.fill = openpyxl.styles.PatternFill("solid", fgColor=BLOCK_THEMES[theme_key]["title"])
+        c.font, c.alignment = title_font, center
 
-    block_title("Shortfall Weeks", SF_START, SF_START + NW - 1)
-    block_title("PO to Issue by", ISSUE_START, ISSUE_START + NW - 1)
-    block_title("PO to Arrive", ARRIVE_START, ARRIVE_START + NW - 1)
+    block_title("Shortfall Weeks", SF_START, SF_START + NW - 1, "sf")
+    block_title("PO to Issue by", ISSUE_START, ISSUE_START + NW - 1, "issue")
+    block_title("PO to Arrive", ARRIVE_START, ARRIVE_START + NW - 1, "arrive")
 
     for i, h in enumerate(["Nav Item Code", "Item Name", "Item Type", "Item Category",
                             "Shortfall Quantity", "Suggested MOQ"], start=1):
         c = ws.cell(2, i); c.value = h; c.fill, c.font, c.alignment = head_fill, head_font, center
     for i, w in enumerate(WEEKS):
-        for base in (SF_START, ISSUE_START, ARRIVE_START):
-            c = ws.cell(2, base + i); c.value = f"Week {w}"; c.fill, c.font, c.alignment = head_fill, head_font, center
+        for base, theme_key in ((SF_START, "sf"), (ISSUE_START, "issue"), (ARRIVE_START, "arrive")):
+            fill = openpyxl.styles.PatternFill("solid", fgColor=BLOCK_THEMES[theme_key]["weeks"][i % 2])
+            c = ws.cell(2, base + i); c.value = f"Week {w}"; c.fill, c.font, c.alignment = fill, head_font, center
 
     SF_COLS = {w: SF_START + i for i, w in enumerate(WEEKS)}
     ISSUE_COLS = {w: ISSUE_START + i for i, w in enumerate(WEEKS)}
@@ -370,8 +384,9 @@ def write_laminates_sheet(wb, results, MONTHS, nav_map):
             cell.font, cell.border = openpyxl.styles.Font(), openpyxl.styles.Border()
 
     _clear_conditional_formatting(ws)
+    opening_cols = [9 + 4 * i for i in range(len(MONTHS))]
     se_cols = [7] + [12 + 4 * i for i in range(len(MONTHS))]
-    _add_negative_highlight(ws, se_cols, TEMPLATE_ROW, new_max_row)
+    _add_negative_highlight(ws, opening_cols + se_cols, TEMPLATE_ROW, new_max_row)
     fix_autofilter(ws, 3, 2)
 
 

@@ -3,11 +3,13 @@ Stock Report parser.
 
 The source file's layout has varied run to run:
   - Sometimes a raw dump sheet (Location_Name, Warehouse_Name, Item_Name, ..., Qty Total)
-  - Sometimes a ready-made pivot (Row Labels, WH-xxx, WH-yyy, ..., Grand Total)
+  - Sometimes a ready-made pivot, headed either "Row Labels" or "Item_Name" in
+    column A, then one column per warehouse, then Grand Total
     - sometimes with all 4 target warehouses as columns, sometimes with only
       the ones that have nonzero stock (missing columns just mean 0 for that WH)
 
-Current stock is always: sum of on-hand quantity across exactly these 4 locations.
+Current stock is always: sum of on-hand quantity across exactly these 4 locations,
+which for a pivot sheet is simply its own Grand Total column.
 """
 import openpyxl
 from collections import defaultdict
@@ -21,7 +23,7 @@ def _find_header_row(ws, max_scan=15):
         vals = [ws.cell(r, c).value for c in range(1, 8)]
         if vals[0] == "Location_Name":
             return r, "raw"
-        if vals[0] == "Row Labels":
+        if vals[0] in ("Row Labels", "Item_Name"):
             return r, "pivot"
     return None, None
 

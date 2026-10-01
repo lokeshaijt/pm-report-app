@@ -14,11 +14,13 @@ import copy
 import re
 from datetime import date, datetime
 import openpyxl
+import openpyxl.worksheet.table
 from openpyxl.formatting.rule import CellIsRule
 from openpyxl.utils import get_column_letter
 
 from .reference_data import DATA_DIR
 from .weeks import month_label as _month_label
+from .weeks import week_number_for
 
 RED_FONT = openpyxl.styles.Font(color="FF9C0006")
 RED_FILL = openpyxl.styles.PatternFill(start_color="FFFFC7CE", end_color="FFFFC7CE", fill_type="solid")
@@ -562,6 +564,67 @@ def write_orders_sheet(wb, src_file, generated_on):
     ws.column_dimensions["D"].width = 16
     ws.column_dimensions["H"].width = 45
     fix_autofilter(ws, 3, 8)
+
+
+# ---------------------------------------------------------------------------
+def write_transaction_report_sheet(wb, rows):
+    """
+    Optional sheet, only written when a Transaction Report was uploaded.
+    One row per (Date, Item), wide format: Date, Item Name, UOM, Item Type,
+    Floor Wastage, Week (hidden), Store Wastage, Total Wastage (formula),
+    Writeoff - with a live SUBTOTAL row above the header for each qty column
+    so the totals track whatever filter is applied in Excel.
+    """
+    sheet_name = "Transaction Report"
+    if sheet_name in wb.sheetnames:
+        del wb[sheet_name]
+    ws = wb.create_sheet(sheet_name)
+
+    header_fill = openpyxl.styles.PatternFill("solid", fgColor="FF1F4E78")
+    header_font = openpyxl.styles.Font(bold=True, color="FFFFFFFF")
+    center = openpyxl.styles.Alignment(horizontal="center", vertical="center")
+    bold = openpyxl.styles.Font(bold=True)
+
+    HEADER_ROW = 2
+    headers = {2: "Date", 3: "Item Name", 4: "UOM", 5: "Item Type", 6: "Floor Wastage",
+               7: "Week", 8: "Store Wastage", 9: "Total Wastage", 10: "Writeoff"}
+    for col, h in headers.items():
+        cell = ws.cell(HEADER_ROW, col, h)
+        cell.font, cell.fill, cell.alignment = header_font, header_fill, center
+
+    row_idx = HEADER_ROW + 1
+    for r in rows:
+        ws.cell(row_idx, 2, r["date"]).number_format = "DD-MM-YYYY"
+        ws.cell(row_idx, 3, r["item_name"])
+        ws.cell(row_idx, 4, r["uom"])
+        ws.cell(row_idx, 5, r["item_type"])
+        ws.cell(row_idx, 6, r["floor_wastage"] or None)
+        ws.cell(row_idx, 7, week_number_for(r["date"]))
+        ws.cell(row_idx, 8, r["store_wastage"] or None)
+        ws.cell(row_idx, 9, f"=F{row_idx}+H{row_idx}")
+        ws.cell(row_idx, 10, r["writeoff"] or None)
+        row_idx += 1
+
+    last_data_row = row_idx - 1
+    if last_data_row >= HEADER_ROW + 1:
+        tbl = openpyxl.worksheet.table.Table(
+            displayName="TransactionReportData", ref=f"B{HEADER_ROW}:J{last_data_row}"
+        )
+        tbl.tableStyleInfo = openpyxl.worksheet.table.TableStyleInfo(
+            name="TableStyleMedium2", showRowStripes=True
+        )
+        ws.add_table(tbl)
+
+        sub_row = HEADER_ROW - 1
+        for col, name in [(6, "Floor Wastage"), (8, "Store Wastage"),
+                           (9, "Total Wastage"), (10, "Writeoff")]:
+            ws.cell(sub_row, col, f"=SUBTOTAL(9,TransactionReportData[{name}])").font = bold
+
+    widths = {"A": 2, "B": 13, "C": 60, "D": 10, "E": 14, "F": 13, "G": 7, "H": 13, "I": 13, "J": 13}
+    for letter, w in widths.items():
+        ws.column_dimensions[letter].width = w
+    ws.column_dimensions["G"].hidden = True
+    ws.freeze_panes = f"B{HEADER_ROW + 1}"
 
 
 # ---------------------------------------------------------------------------

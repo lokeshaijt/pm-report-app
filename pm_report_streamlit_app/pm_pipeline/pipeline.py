@@ -16,17 +16,22 @@ from .demand import aggregate_weekly, aggregate_monthly
 from .cascade import explode_demand, run_cascade, consolidate_shortfall
 from .canpack import build_canpack
 from .weeks import build_week_window, build_month_window
+from .transaction_report import parse_transaction_report
 from . import report_writer as rw
 
 
 def generate_report(export_file, domestic_file, pending_po_file, stock_file,
-                     supplemental_bom_file=None, today: date = None, progress_cb=None):
+                     supplemental_bom_file=None, transaction_report_file=None,
+                     today: date = None, progress_cb=None):
     """
     Each *_file argument is a file-like object (e.g. from st.file_uploader).
     supplemental_bom_file is optional: a one-off BOM (same 6-column layout as
     the bundled Exploded_BOM_Supplemental.xlsx) covering FGs still showing on
     the Possible Error sheet. It is merged in for this run only - it is not
     saved into the bundled reference data.
+    transaction_report_file is optional: the raw Transaction Report export
+    (.xlsb or .xlsx). When provided, a "Transaction Report" sheet is added
+    with Floor/Store/Total Wastage and Writeoff per item per day.
     progress_cb(pct: float, message: str) is called periodically if provided.
     Returns: (bytes of the finished .xlsx, a dict of summary stats for the UI)
     """
@@ -132,6 +137,13 @@ def generate_report(export_file, domestic_file, pending_po_file, stock_file,
     pending_po_file.seek(0)
     rw.write_raw_hidden_sheet(wb, "Pending PO", pending_po_file)
 
+    transaction_report_rows = 0
+    if transaction_report_file is not None:
+        prog(0.92, "Parsing Transaction Report...")
+        txn_rows = parse_transaction_report(transaction_report_file)
+        rw.write_transaction_report_sheet(wb, txn_rows)
+        transaction_report_rows = len(txn_rows)
+
     prog(0.95, "Finalizing...")
     buf = io.BytesIO()
     wb.save(buf)
@@ -147,6 +159,7 @@ def generate_report(export_file, domestic_file, pending_po_file, stock_file,
         "possible_error_distinct_fgs": len({r["fg_name"] for r in possible_error}),
         "po_format": po_format,
         "po_excluded_other_location": po_excluded,
+        "transaction_report_rows": transaction_report_rows,
     }
     prog(1.0, "Done.")
     return buf.getvalue(), stats

@@ -23,6 +23,7 @@ from datetime import date, datetime, timedelta
 import openpyxl
 
 from .utils import norm_disp
+from .weeks import week_number_for
 
 STORE_FROM_WAREHOUSES = {"WH-PM-MDKCBE", "WH-PM-MDKCBE2"}
 REQUIRED_HEADERS = ("Transaction Type", "Item_Name", "Movement Type", "Doc_Date", "Qty")
@@ -138,3 +139,14 @@ def parse_transaction_report(file_obj):
             "writeoff": round(v["writeoff"], 4),
         })
     return out
+
+
+def filter_last_n_completed_weeks(rows, today, n=6):
+    """
+    Keeps only rows whose date falls in the N most recently *completed*
+    weeks before today's own (in-progress) week - e.g. on a day in week 40,
+    "last 6 weeks" means weeks 34-39, not weeks 35-40.
+    """
+    current_week = week_number_for(today)
+    min_week, max_week = current_week - n, current_week - 1
+    return [r for r in rows if min_week <= week_number_for(r["date"]) <= max_week]

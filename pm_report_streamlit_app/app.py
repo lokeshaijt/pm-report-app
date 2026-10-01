@@ -122,6 +122,9 @@ with st.expander("What this does", expanded=False):
     - Pending PO: uses the curated "Outstanding Qty" format as-is when that's
       what you upload; if a full company-wide raw extract shows up instead, it
       automatically filters to Location Code = CBEPM only.
+    - **Transaction Report** (optional upload): Floor Wastage, Store Wastage,
+      Total Wastage and Writeoff per item per day, covering the last 6
+      completed weeks before the report date.
     """)
 
 st.markdown('<span class="jay-section-label">Step 1</span>', unsafe_allow_html=True)
@@ -153,7 +156,8 @@ st.subheader("Optional: Transaction Report")
 st.caption(
     "Raw Transaction Report export from the source system (.xlsb or .xlsx). "
     "When uploaded, adds a **Transaction Report** sheet with Floor Wastage, "
-    "Store Wastage, Total Wastage and Writeoff per item per day."
+    "Store Wastage, Total Wastage and Writeoff per item per day, covering "
+    "the last 6 completed weeks before the report date."
 )
 transaction_report_file = st.file_uploader(
     "Transaction Report (optional)", type=["xlsb", "xlsx"], key="txn_report"

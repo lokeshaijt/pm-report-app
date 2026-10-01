@@ -111,7 +111,7 @@ with st.expander("What this does", expanded=False):
       forward and compounds until something arrives to offset it.
     - **Shortfall** sheet: one row per item, incremental per-week shortfall
       amounts (not raw running balance), Suggested MOQ, PO Issue-by/Arrive-by
-      columns (-4 weeks / +2 weeks).
+      columns (-5 weeks / +2 weeks).
     - **Possible Error** sheet: every order line for an FG with no BOM entry at
       all (excluding FG-/STD-prefixed internal placeholders), with the order's
       own Nav Doc No for traceability.
@@ -149,10 +149,21 @@ supplemental_bom_file = st.file_uploader(
 )
 
 st.markdown('<span class="jay-section-label">Step 3</span>', unsafe_allow_html=True)
+st.subheader("Optional: Transaction Report")
+st.caption(
+    "Raw Transaction Report export from the source system (.xlsb or .xlsx). "
+    "When uploaded, adds a **Transaction Report** sheet with Floor Wastage, "
+    "Store Wastage, Total Wastage and Writeoff per item per day."
+)
+transaction_report_file = st.file_uploader(
+    "Transaction Report (optional)", type=["xlsb", "xlsx"], key="txn_report"
+)
+
+st.markdown('<span class="jay-section-label">Step 4</span>', unsafe_allow_html=True)
 st.subheader("Report date")
 report_date = st.date_input("Treat this as 'today' for the report", value=date.today())
 
-st.markdown('<span class="jay-section-label">Step 4</span>', unsafe_allow_html=True)
+st.markdown('<span class="jay-section-label">Step 5</span>', unsafe_allow_html=True)
 st.subheader("Generate")
 all_uploaded = all([export_file, domestic_file, pending_po_file, stock_file])
 
@@ -173,6 +184,7 @@ if generate:
         xlsx_bytes, stats = generate_report(
             export_file, domestic_file, pending_po_file, stock_file,
             supplemental_bom_file=supplemental_bom_file,
+            transaction_report_file=transaction_report_file,
             today=report_date, progress_cb=progress_cb,
         )
     except Exception as e:
@@ -184,12 +196,15 @@ if generate:
         po_note = ""
         if stats["po_format"] == "raw":
             po_note = f"\n**Pending PO:** raw company-wide extract detected - filtered to CBEPM only ({stats['po_excluded_other_location']:,} rows from other locations excluded)."
+        txn_note = ""
+        if transaction_report_file is not None:
+            txn_note = f"\n**Transaction Report:** {stats['transaction_report_rows']:,} item/day rows."
         st.markdown(f"""
         **Week range:** Week {w1}-{w2} ({s.strftime('%d-%b-%y')} to {e.strftime('%d-%b-%y')})
         **PM items in universe:** {stats['pm_item_count']:,}
         **Items with a weekly shortfall:** {stats['weekly_shortfall_items']:,}
         **Shortfall sheet rows:** {stats['consolidated_shortfall_rows']:,}
-        **Possible Error rows:** {stats['possible_error_rows']:,} ({stats['possible_error_distinct_fgs']:,} distinct FGs still missing from the BOM){po_note}
+        **Possible Error rows:** {stats['possible_error_rows']:,} ({stats['possible_error_distinct_fgs']:,} distinct FGs still missing from the BOM){po_note}{txn_note}
         """)
         filename = f"Packing_Materials_-_Weekly_Requirements_{report_date.strftime('%d%b%Y')}.xlsx"
         st.download_button(

@@ -81,23 +81,37 @@ def fix_autofilter(ws, header_row, check_col):
 # ---------------------------------------------------------------------------
 def write_canpack_sheet(wb, rows):
     ws = wb["FG & PM STOCK"]
-    TEMPLATE_ROW, MAX_COL = 2, 9
+    TEMPLATE_ROW, MAX_COL = 2, 10
     OLD_MAX_ROW = ws.max_row
-    style = _style_ref(ws, TEMPLATE_ROW, MAX_COL)
+    # column 5 (old PLANNED ORDERS) is dropped; the two new Leftover columns
+    # at the end reuse the CFC/CTN stock columns' style.
+    STYLE_SRC = {1: 1, 2: 2, 3: 3, 4: 4, 5: 6, 6: 7, 7: 8, 8: 9, 9: 6, 10: 7}
+    style = _style_ref(ws, TEMPLATE_ROW, 9)
+    header_style = _style_ref(ws, 1, 9)
+
+    headers = ["FG NAME", "BRAND", "ORDER STATUS", "TOTAL AVAILABLE SALE ORDERS BC",
+               "CFC STOCK (IN CASES)", "CTN STOCK (IN CASES)", "CAN PACK (BASIS PM STOCK)",
+               "SHORT / EXCESS", "LEFTOVER CFC (IN CASES)", "LEFTOVER CTN (IN CASES)"]
+    for col, h in enumerate(headers, start=1):
+        cell = ws.cell(1, col); cell.value = h
+        t = header_style[STYLE_SRC[col]]
+        cell.font, cell.fill, cell.border, cell.alignment = t["font"], t["fill"], t["border"], t["alignment"]
 
     for r in range(TEMPLATE_ROW, OLD_MAX_ROW + 1):
         for c in range(1, MAX_COL + 1):
             ws.cell(r, c).value = None
 
     def apply(cell, col):
-        t = style[col]
+        t = style[STYLE_SRC[col]]
         cell.font, cell.fill, cell.border, cell.alignment = t["font"], t["fill"], t["border"], t["alignment"]
         cell.number_format = t["number_format"]
 
     row_idx = TEMPLATE_ROW
     for r in rows:
-        vals = [r["fg"], r["brand"], r["order_flag"], r["total_orders_bc"], r["planned_orders"],
-                r["cfc_cases"], r["ctn_cases"], r["can_pack"], r["short_excess"]]
+        vals = [r["fg"], r["brand"], r["order_flag"], r["total_orders_bc"],
+                r["cfc_cases"], r["ctn_cases"], r["can_pack"], r["short_excess"],
+                r["leftover_cfc"] if r["leftover_cfc"] is not None else "-",
+                r["leftover_ctn"] if r["leftover_ctn"] is not None else "-"]
         for col, val in enumerate(vals, start=1):
             cell = ws.cell(row_idx, col); cell.value = val; apply(cell, col)
         row_idx += 1
@@ -110,8 +124,10 @@ def write_canpack_sheet(wb, rows):
             cell.font, cell.border = openpyxl.styles.Font(), openpyxl.styles.Border()
 
     _clear_conditional_formatting(ws)
-    _add_negative_highlight(ws, [9], TEMPLATE_ROW, new_max_row)
+    _add_negative_highlight(ws, [8], TEMPLATE_ROW, new_max_row)
     fix_autofilter(ws, 1, 1)
+    ws.column_dimensions["I"].width = 14
+    ws.column_dimensions["J"].width = 14
 
 
 # ---------------------------------------------------------------------------

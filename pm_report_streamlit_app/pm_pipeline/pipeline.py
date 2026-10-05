@@ -114,7 +114,8 @@ def generate_report(export_file, domestic_file, pending_po_file, stock_file,
 
     # ---- 8. Can Pack sheet ----
     prog(0.75, "Building the Can Pack sheet...")
-    canpack_out = build_canpack(canpack_master, fg_cfc, fg_ctn, fg_brand, stock, canpack_rows)
+    canpack_out = build_canpack(canpack_master, fg_cfc, fg_ctn, fg_brand, stock, canpack_rows,
+                                 pending_po=total_pending_po)
 
     # ---- 9. Write the workbook ----
     prog(0.85, "Writing the formatted workbook...")

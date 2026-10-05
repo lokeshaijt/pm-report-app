@@ -95,7 +95,9 @@ def load_bom(path=f"{DATA_DIR}/Exploded_BOM.xlsx"):
         if itemk not in uom_map and uom:
             uom_map[itemk] = uom
         raw_rows.append((fg, item, qty))
-        if item_type == "CFC":
+        # TRAY shares the Can Pack sheet's CFC columns (stock, cascade, Leftover) -
+        # it isn't a separate bucket, just another CFC-like item type.
+        if item_type in ("CFC", "TRAY"):
             fg_cfc.setdefault(fgk, []).append((norm_disp(item), qty))
         elif item_type == "CTN":
             fg_ctn.setdefault(fgk, []).append((norm_disp(item), qty))

@@ -131,18 +131,17 @@ def infer_meta(item_name):
     return (None, None)
 
 
-def load_supplemental_bom(path):
-    """
-    Parses a supplemental BOM in the 6-column layout (FG Name, Item Name, Qty,
-    Uom, Brand, FG Uom - no ITEM TYPE/ITEM GROUP columns). Used both for the
-    bundled standing merge and for any one-off file uploaded at runtime.
-    """
-    wb = openpyxl.load_workbook(path, data_only=True, read_only=True)
-    ws = wb[wb.sheetnames[0]]
+def _load_supplemental_bom_curated(ws):
+    """6-column layout: FG Name, Item Name, Qty, Uom, Brand, FG Uom (no ITEM
+    TYPE/ITEM GROUP columns) - title on row 1, header on row 2, data from row 3.
+    This is the bundled standing-merge format."""
     raw_rows = []
     fg_brand = {}
     for row in ws.iter_rows(min_row=3, values_only=True):
-        fg, item, qty, uom, brand = row[0], row[1], row[2], row[3], row[4]
+        if row is None or len(row) < 3:
+            continue
+        fg, item, qty = row[0], row[1], row[2]
+        brand = row[4] if len(row) > 4 else None
         if fg is None or item is None:
             continue
         fgk = norm(fg)
@@ -150,6 +149,63 @@ def load_supplemental_bom(path):
             fg_brand[fgk] = brand
         raw_rows.append((fg, item, qty))
     return raw_rows, fg_brand
+
+
+def _load_supplemental_bom_routing_grid(ws):
+    """4-column raw ERP export: BOM_Name, Item_Name, Qty, UOM_Name - header on
+    row 1, data from row 2. UOM_Name doubles as a loose item-type hint (CFC,
+    CTN, ...) rather than a real unit, and each FG typically carries one
+    redundant row where Item_Name just repeats the FG name with UOM_Name=CFC
+    alongside a properly-named "CFC <name>" row for the same thing - drop the
+    duplicate. CTN-type rows are routinely missing the "CTN " prefix the rest
+    of the BOM and Stock Report rely on to resolve against real stock, so it's
+    added here when missing."""
+    by_fg = {}
+    order = []
+    for row in ws.iter_rows(min_row=2, values_only=True):
+        if row is None or len(row) < 3:
+            continue
+        fg, item, qty = row[0], row[1], row[2]
+        uom = row[3] if len(row) > 3 else None
+        if fg is None or item is None:
+            continue
+        fg, item = str(fg).strip(), str(item).strip()
+        uom = str(uom).strip().upper() if uom else ""
+        if fg not in by_fg:
+            by_fg[fg] = []
+            order.append(fg)
+        by_fg[fg].append((item, qty, uom))
+
+    raw_rows = []
+    for fg in order:
+        items = by_fg[fg]
+        has_proper_cfc = any(i.upper().startswith("CFC ") for i, _, _ in items)
+        for item, qty, uom in items:
+            if uom == "CFC" and item.upper() == fg.upper() and has_proper_cfc:
+                continue
+            if uom == "CTN" and not item.upper().startswith("CTN "):
+                item = f"CTN {item}"
+            raw_rows.append((fg, item, qty))
+    return raw_rows, {}
+
+
+def load_supplemental_bom(path):
+    """
+    Parses a one-off supplemental BOM, auto-detecting which of two layouts it
+    is by header content: the curated 6-column format, or a raw 4-column
+    "Routing Grid" ERP export. Used both for the bundled standing merge and
+    for any file uploaded at runtime.
+    """
+    wb = openpyxl.load_workbook(path, data_only=True, read_only=True)
+    ws = wb[wb.sheetnames[0]]
+    header2 = [ws.cell(2, c).value for c in range(1, 7)]
+    if header2[:2] == ["FG Name", "Item Name"]:
+        return _load_supplemental_bom_curated(ws)
+    header1 = [ws.cell(1, c).value for c in range(1, 5)]
+    if header1[:2] == ["BOM_Name", "Item_Name"]:
+        return _load_supplemental_bom_routing_grid(ws)
+    # fall back to the curated layout's row positions, best-effort
+    return _load_supplemental_bom_curated(ws)
 
 
 def load_canpack_master(path=f"{DATA_DIR}/Can_Pack_Master.xlsx"):

@@ -1,7 +1,7 @@
 """
 Can Pack sheet: for every FG in the Can Pack master list, how many cases can
-be packed right now given CFC/CTN stock, versus how many are actually on
-order.
+be packed right now given CFC/CTN stock and Pending PO, versus how many are
+actually on order.
 
 CFC/CTN stock is shared: a carton can be the exact same physical item used by
 several FGs (flavor variants of one line, pack-size variants, a combo pack
@@ -13,14 +13,22 @@ it has already taken its share - not the full original stock - and what it
 actually packs is deducted (in pieces, via its own qty-per-case ratio) before
 the next FG down sees the pool.
 
-CFC (in cases), CTN (in cases) and Can Pack all show the same binding
-minimum whenever an FG uses both materials, since Can Pack can never exceed
-whichever material runs out first. Leftover CFC/CTN instead compares each
-material's own independent capacity (ignoring the other material) to what
-actually got packed, so a non-binding material's slack is still visible -
-but only on the last FG (in sheet order) still drawing on that shared item,
-so an only-partially-depleted pool isn't reported as "leftover" over and
-over on every FG still ahead of it in the queue.
+Pending PO runs through the exact same row-order cascade, but as its own
+separate pool - a pending carton isn't physically the same piece as a stock
+carton, so the two pools deplete independently. CFC/CTN (in cases) show each
+pool's own cascaded capacity; Total CFC/CTN (in cases) is simply their sum,
+and Can Pack is based on the Total, since Pending PO can cover part of what
+Stock alone falls short of. When Can Pack draws on Pending PO for a bucket,
+the Stock pool for that bucket is only ever deducted up to what Stock alone
+actually has (it never goes negative) - the rest comes out of the Pending PO
+pool instead.
+
+Leftover CFC/CTN is the actual PIECES left over in the Stock pool once the
+whole chain is done with a shared item - not a case count, since a material
+can be the binding constraint (0 cases of case-level "slack") while still
+leaving a handful of pieces that don't add up to one more case. It's shown
+only on the last FG (in sheet order) still drawing on that shared item, so a
+partially-depleted pool isn't reported as leftover on every FG ahead of it.
 
 This sheet deliberately ignores date/week windowing - Total Available Sale
 Orders BC is summed across the *entire* order book, no cutoff.
@@ -40,19 +48,26 @@ def _cap_from_pool(items, pool):
     return min(caps)
 
 
+def _floor_or_zero(cap):
+    return 0 if cap in (None, float("inf")) else math.floor(cap)
+
+
 def _is_last_user(fgk, items, last_user_map):
     if not items:
         return False
     return all(last_user_map.get(item.upper()) == fgk for item, _ in items)
 
 
-def build_canpack(master_fgs, fg_cfc, fg_ctn, fg_brand, stock, canpack_rows):
+def build_canpack(master_fgs, fg_cfc, fg_ctn, fg_brand, stock, canpack_rows, pending_po=None):
     """
     master_fgs: list of (fg_key, fg_display, brand_from_master), in the exact
     row order the FG & PM STOCK sheet is written in - this is also the order
-    the shared CFC/CTN pool cascades through.
+    the shared CFC/CTN pools cascade through.
     canpack_rows: combined list of (fg_key, pending_ord_qty, pending_prod) across all order files
+    pending_po: {item_key: total_outstanding_qty} in pieces (from parse_pending_po), optional
     """
+    pending_po = pending_po or {}
+
     total_orders_bc, planned_prod = {}, {}
     has_order = set()
     for fgk, poq, pp in canpack_rows:
@@ -71,7 +86,8 @@ def build_canpack(master_fgs, fg_cfc, fg_ctn, fg_brand, stock, canpack_rows):
         for item, _ in fg_ctn.get(fgk, []):
             last_ctn_user[item.upper()] = fgk
 
-    remaining = {k.upper(): v for k, v in stock.items()}
+    remaining_stock = {k.upper(): v for k, v in stock.items()}
+    remaining_po = {k.upper(): v for k, v in pending_po.items()}
 
     rows_out = []
     for fgk, fg_disp, brand_master in master_fgs:
@@ -82,33 +98,49 @@ def build_canpack(master_fgs, fg_cfc, fg_ctn, fg_brand, stock, canpack_rows):
         cfc_items = fg_cfc.get(fgk, [])
         ctn_items = fg_ctn.get(fgk, [])
 
-        cfc_cap = _cap_from_pool(cfc_items, remaining)
-        ctn_cap = _cap_from_pool(ctn_items, remaining)
-        own_cfc_cases = 0 if cfc_cap in (None, float("inf")) else math.floor(cfc_cap)
-        own_ctn_cases = 0 if ctn_cap in (None, float("inf")) else math.floor(ctn_cap)
+        own_cfc_stock = _floor_or_zero(_cap_from_pool(cfc_items, remaining_stock))
+        own_ctn_stock = _floor_or_zero(_cap_from_pool(ctn_items, remaining_stock))
+        own_cfc_po = _floor_or_zero(_cap_from_pool(cfc_items, remaining_po))
+        own_ctn_po = _floor_or_zero(_cap_from_pool(ctn_items, remaining_po))
 
-        caps = [c for c in (cfc_cap, ctn_cap) if c is not None]
-        can_pack = math.floor(min(caps)) if caps else 0
+        total_cfc = own_cfc_stock + own_cfc_po
+        total_ctn = own_ctn_stock + own_ctn_po
 
-        cfc_cases = can_pack if cfc_items else "-"
-        ctn_cases = can_pack if ctn_items else "-"
+        totals = [t for t, items in ((total_cfc, cfc_items), (total_ctn, ctn_items)) if items]
+        can_pack = min(totals) if totals else 0
 
-        leftover_cfc = (own_cfc_cases - can_pack) if cfc_items else None
-        leftover_ctn = (own_ctn_cases - can_pack) if ctn_items else None
+        cfc_stock_cases = own_cfc_stock if cfc_items else "-"
+        ctn_stock_cases = own_ctn_stock if ctn_items else "-"
+        cfc_po_cases = own_cfc_po if cfc_items else "-"
+        ctn_po_cases = own_ctn_po if ctn_items else "-"
+        total_cfc_cases = total_cfc if cfc_items else "-"
+        total_ctn_cases = total_ctn if ctn_items else "-"
+
+        # Stock is only ever drawn down to what it actually has; whatever
+        # portion of Can Pack it can't cover comes out of Pending PO instead.
+        cfc_from_stock = min(can_pack, own_cfc_stock) if cfc_items else 0
+        cfc_from_po = can_pack - cfc_from_stock if cfc_items else 0
+        ctn_from_stock = min(can_pack, own_ctn_stock) if ctn_items else 0
+        ctn_from_po = can_pack - ctn_from_stock if ctn_items else 0
+
+        for item, qty in cfc_items:
+            k = item.upper()
+            remaining_stock[k] = remaining_stock.get(k, 0.0) - cfc_from_stock * (qty or 0)
+            remaining_po[k] = remaining_po.get(k, 0.0) - cfc_from_po * (qty or 0)
+        for item, qty in ctn_items:
+            k = item.upper()
+            remaining_stock[k] = remaining_stock.get(k, 0.0) - ctn_from_stock * (qty or 0)
+            remaining_po[k] = remaining_po.get(k, 0.0) - ctn_from_po * (qty or 0)
+
+        # Leftover = actual pieces left in the Stock pool, read right after
+        # this row's own Stock deduction - correct for the true last user of
+        # a shared item, since nothing after it will deduct any further.
+        leftover_cfc = round(sum(remaining_stock.get(i.upper(), 0.0) for i, _ in cfc_items)) if cfc_items else None
+        leftover_ctn = round(sum(remaining_stock.get(i.upper(), 0.0) for i, _ in ctn_items)) if ctn_items else None
         if leftover_cfc is not None and not _is_last_user(fgk, cfc_items, last_cfc_user):
             leftover_cfc = None
         if leftover_ctn is not None and not _is_last_user(fgk, ctn_items, last_ctn_user):
             leftover_ctn = None
-
-        # what actually gets packed is deducted from the shared pool, in
-        # pieces, via each item's own qty-per-case ratio - so the next FG
-        # down sharing this item sees the reduced amount.
-        for item, qty in cfc_items:
-            k = item.upper()
-            remaining[k] = remaining.get(k, 0.0) - can_pack * (qty or 0)
-        for item, qty in ctn_items:
-            k = item.upper()
-            remaining[k] = remaining.get(k, 0.0) - can_pack * (qty or 0)
 
         toab = total_orders_bc.get(fgk, 0.0) if is_order else 0.0
         short_excess = can_pack - toab
@@ -116,7 +148,8 @@ def build_canpack(master_fgs, fg_cfc, fg_ctn, fg_brand, stock, canpack_rows):
         rows_out.append({
             "fg": fg_disp, "brand": brand, "order_flag": order_flag,
             "total_orders_bc": toab,
-            "cfc_cases": cfc_cases, "ctn_cases": ctn_cases,
+            "cfc_stock_cases": cfc_stock_cases, "cfc_po_cases": cfc_po_cases, "total_cfc_cases": total_cfc_cases,
+            "ctn_stock_cases": ctn_stock_cases, "ctn_po_cases": ctn_po_cases, "total_ctn_cases": total_ctn_cases,
             "leftover_cfc": leftover_cfc, "leftover_ctn": leftover_ctn,
             "can_pack": can_pack, "short_excess": short_excess,
         })

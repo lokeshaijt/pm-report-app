@@ -122,9 +122,9 @@ with st.expander("What this does", expanded=False):
     - Pending PO: uses the curated "Outstanding Qty" format as-is when that's
       what you upload; if a full company-wide raw extract shows up instead, it
       automatically filters to Location Code = CBEPM only.
-    - **Transaction Report** (optional upload): Floor Wastage, Store Wastage,
-      Total Wastage and Writeoff per item per day, covering the last 6
-      completed weeks before the report date.
+    - **Transaction Report** (optional upload): one row per item, with Floor
+      Wastage, Store Wastage, Total Wastage and Writeoff broken out week by
+      week for the last 4 completed weeks before the report date.
     """)
 
 st.markdown('<span class="jay-section-label">Step 1</span>', unsafe_allow_html=True)
@@ -155,9 +155,9 @@ st.markdown('<span class="jay-section-label">Step 3</span>', unsafe_allow_html=T
 st.subheader("Optional: Transaction Report")
 st.caption(
     "Raw Transaction Report export from the source system (.xlsb or .xlsx). "
-    "When uploaded, adds a **Transaction Report** sheet with Floor Wastage, "
-    "Store Wastage, Total Wastage and Writeoff per item per day, covering "
-    "the last 6 completed weeks before the report date."
+    "When uploaded, adds a **Transaction Report** sheet: one row per item, "
+    "with Floor Wastage, Store Wastage, Total Wastage and Writeoff broken "
+    "out week by week for the last 4 completed weeks before the report date."
 )
 transaction_report_file = st.file_uploader(
     "Transaction Report (optional)", type=["xlsb", "xlsx"], key="txn_report"
@@ -202,7 +202,7 @@ if generate:
             po_note = f"\n**Pending PO:** raw company-wide extract detected - filtered to CBEPM only ({stats['po_excluded_other_location']:,} rows from other locations excluded)."
         txn_note = ""
         if transaction_report_file is not None:
-            txn_note = f"\n**Transaction Report:** {stats['transaction_report_rows']:,} item/day rows."
+            txn_note = f"\n**Transaction Report:** {stats['transaction_report_rows']:,} items."
         st.markdown(f"""
         **Week range:** Week {w1}-{w2} ({s.strftime('%d-%b-%y')} to {e.strftime('%d-%b-%y')})
         **PM items in universe:** {stats['pm_item_count']:,}

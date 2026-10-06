@@ -16,7 +16,7 @@ from .demand import aggregate_weekly, aggregate_monthly
 from .cascade import explode_demand, run_cascade, consolidate_shortfall
 from .canpack import build_canpack
 from .weeks import build_week_window, build_month_window
-from .transaction_report import parse_transaction_report, filter_last_n_completed_weeks
+from .transaction_report import parse_transaction_report, last_n_completed_weeks, pivot_weekwise
 from . import report_writer as rw
 
 
@@ -30,9 +30,10 @@ def generate_report(export_file, domestic_file, pending_po_file, stock_file,
     the Possible Error sheet. It is merged in for this run only - it is not
     saved into the bundled reference data.
     transaction_report_file is optional: the raw Transaction Report export
-    (.xlsb or .xlsx). When provided, a "Transaction Report" sheet is added
-    with Floor/Store/Total Wastage and Writeoff per item per day, limited to
-    the 6 most recently completed weeks before today's own (in-progress) week.
+    (.xlsb or .xlsx). When provided, a "Transaction Report" sheet is added:
+    one row per item, with Floor/Store/Total Wastage and Writeoff broken out
+    week by week for the 4 most recently completed weeks before today's own
+    (in-progress) week.
     progress_cb(pct: float, message: str) is called periodically if provided.
     Returns: (bytes of the finished .xlsx, a dict of summary stats for the UI)
     """
@@ -143,9 +144,10 @@ def generate_report(export_file, domestic_file, pending_po_file, stock_file,
     if transaction_report_file is not None:
         prog(0.92, "Parsing Transaction Report...")
         txn_rows = parse_transaction_report(transaction_report_file)
-        txn_rows = filter_last_n_completed_weeks(txn_rows, today, n=6)
-        rw.write_transaction_report_sheet(wb, txn_rows)
-        transaction_report_rows = len(txn_rows)
+        txn_weeks = last_n_completed_weeks(today, n=4)
+        txn_items, txn_by_item_week = pivot_weekwise(txn_rows, txn_weeks)
+        rw.write_transaction_report_sheet(wb, txn_items, txn_by_item_week, txn_weeks)
+        transaction_report_rows = len(txn_items)
 
     prog(0.95, "Finalizing...")
     buf = io.BytesIO()

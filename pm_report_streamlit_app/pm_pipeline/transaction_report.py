@@ -23,7 +23,7 @@ from datetime import date, datetime, timedelta
 import openpyxl
 
 from .utils import norm_disp
-from .weeks import week_number_for
+from .weeks import week_number_for, week_bounds
 
 STORE_FROM_WAREHOUSES = {"WH-PM-MDKCBE", "WH-PM-MDKCBE2"}
 REQUIRED_HEADERS = ("Transaction Type", "Item_Name", "Movement Type", "Doc_Date", "Qty")
@@ -150,3 +150,44 @@ def filter_last_n_completed_weeks(rows, today, n=6):
     current_week = week_number_for(today)
     min_week, max_week = current_week - n, current_week - 1
     return [r for r in rows if min_week <= week_number_for(r["date"]) <= max_week]
+
+
+def last_n_completed_weeks(today, n=4):
+    """The N most recently completed week numbers before today's own
+    (in-progress) week, oldest first - e.g. on a day in week 41, n=4 gives
+    [37, 38, 39, 40]."""
+    current_week = week_number_for(today)
+    return list(range(current_week - n, current_week))
+
+
+def pivot_weekwise(rows, weeks):
+    """
+    Pivots parse_transaction_report()'s per-(date, item) rows into one row
+    per item, with Floor/Store/Writeoff summed within each of the given
+    week numbers.
+    Returns (items, by_item_week):
+      items: sorted list of {item_name, uom, item_type}
+      by_item_week: {(item_name, week): {floor, store, writeoff}}
+    """
+    weeks_set = set(weeks)
+    by_item_week = {}
+    item_meta = {}
+    for r in rows:
+        w = week_number_for(r["date"])
+        if w not in weeks_set:
+            continue
+        item_meta.setdefault(r["item_name"], {"uom": r["uom"], "item_type": r["item_type"]})
+        key = (r["item_name"], w)
+        if key not in by_item_week:
+            by_item_week[key] = {"floor": 0.0, "store": 0.0, "writeoff": 0.0}
+        by_item_week[key]["floor"] += r["floor_wastage"]
+        by_item_week[key]["store"] += r["store_wastage"]
+        by_item_week[key]["writeoff"] += r["writeoff"]
+
+    items = [{"item_name": name, **meta} for name, meta in sorted(item_meta.items())]
+    return items, by_item_week
+
+
+def week_label(w):
+    s, e = week_bounds(w)
+    return f"Week {w} ({s.strftime('%d-%b')} to {e.strftime('%d-%b')})"

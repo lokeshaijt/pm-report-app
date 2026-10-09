@@ -141,6 +141,42 @@ def parse_transaction_report(file_obj):
     return out
 
 
+def parse_consumption(file_obj):
+    """
+    Returns {item_name: {"qty", "uom", "item_type"}}: total Consumption per
+    item from Transaction Type == "PROCESS", STOCKOUT leg only - same
+    convention as Floor/Store Wastage (avoids double counting the paired
+    STOCKIN leg, which for PROCESS is a much smaller, unrelated flow rather
+    than a mirror of the same event, not a 1:1 pair).
+    """
+    name = (getattr(file_obj, "name", "") or "").lower()
+    file_obj.seek(0)
+    rows = _rows_from_xlsb(file_obj) if name.endswith(".xlsb") else _rows_from_xlsx(file_obj)
+
+    consumption = {}
+    for r in rows:
+        if str(r.get("Transaction Type") or "").strip().upper() != "PROCESS":
+            continue
+        if str(r.get("Movement Type") or "").strip().upper() != "STOCKOUT":
+            continue
+        item_name = r.get("Item_Name")
+        if not item_name:
+            continue
+        item_name = norm_disp(item_name)
+        try:
+            qty = float(r.get("Qty"))
+        except (TypeError, ValueError):
+            continue
+        if item_name not in consumption:
+            consumption[item_name] = {"qty": 0.0, "uom": r.get("UOM_Name") or "",
+                                       "item_type": r.get("Item_Type_Name") or ""}
+        consumption[item_name]["qty"] += qty
+
+    for v in consumption.values():
+        v["qty"] = round(v["qty"], 4)
+    return consumption
+
+
 def filter_last_n_completed_weeks(rows, today, n=6):
     """
     Keeps only rows whose date falls in the N most recently *completed*
@@ -186,6 +222,21 @@ def pivot_weekwise(rows, weeks):
 
     items = [{"item_name": name, **meta} for name, meta in sorted(item_meta.items())]
     return items, by_item_week
+
+
+def merge_item_universe(items, consumption):
+    """
+    Combines pivot_weekwise()'s item list with parse_consumption()'s item
+    dict into one sorted list covering every item that has either wastage/
+    writeoff activity or Consumption - an item with real Consumption but no
+    wastage this period still needs a row (0% wastage), and vice versa.
+    """
+    by_name = {it["item_name"]: {"item_name": it["item_name"], "uom": it["uom"],
+                                  "item_type": it["item_type"]} for it in items}
+    for name, meta in consumption.items():
+        if name not in by_name:
+            by_name[name] = {"item_name": name, "uom": meta["uom"], "item_type": meta["item_type"]}
+    return [by_name[k] for k in sorted(by_name.keys())]
 
 
 def week_label(w):

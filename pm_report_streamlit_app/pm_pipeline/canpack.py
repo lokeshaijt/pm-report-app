@@ -23,12 +23,19 @@ the Stock pool for that bucket is only ever deducted up to what Stock alone
 actually has (it never goes negative) - the rest comes out of the Pending PO
 pool instead.
 
-Leftover CFC/CTN is the actual PIECES left over in the Stock pool once the
-whole chain is done with a shared item - not a case count, since a material
-can be the binding constraint (0 cases of case-level "slack") while still
-leaving a handful of pieces that don't add up to one more case. It's shown
-only on the last FG (in sheet order) still drawing on that shared item, so a
-partially-depleted pool isn't reported as leftover on every FG ahead of it.
+For a shared item, CFC/CTN Stock, Pending PO and Total show only what that
+FG actually draws toward its own Can Pack (from_stock/from_po), not the raw
+pool size - showing the full pool on every FG sharing it would make it look
+like far more is available than really is, once everyone's claim is
+accounted for. Only the true last FG (in sheet order) still drawing on that
+item shows the real remaining pool, since it's the only one whose number
+won't be made stale by someone claiming more after it. An item not shared
+with anyone is trivially its own "last user", so this never changes its
+numbers. Leftover CFC/CTN is the actual PIECES left over in the Stock pool
+once the whole chain is done with a shared item - not a case count, since a
+material can be the binding constraint (0 cases of case-level "slack")
+while still leaving a handful of pieces that don't add up to one more case.
+It's likewise shown only on that same true last FG.
 
 This sheet deliberately ignores date/week windowing - Total Available Sale
 Orders BC is summed across the *entire* order book, no cutoff.
@@ -109,19 +116,25 @@ def build_canpack(master_fgs, fg_cfc, fg_ctn, fg_brand, stock, canpack_rows, pen
         totals = [t for t, items in ((total_cfc, cfc_items), (total_ctn, ctn_items)) if items]
         can_pack = min(totals) if totals else 0
 
-        cfc_stock_cases = own_cfc_stock if cfc_items else "-"
-        ctn_stock_cases = own_ctn_stock if ctn_items else "-"
-        cfc_po_cases = own_cfc_po if cfc_items else "-"
-        ctn_po_cases = own_ctn_po if ctn_items else "-"
-        total_cfc_cases = total_cfc if cfc_items else "-"
-        total_ctn_cases = total_ctn if ctn_items else "-"
-
         # Stock is only ever drawn down to what it actually has; whatever
         # portion of Can Pack it can't cover comes out of Pending PO instead.
         cfc_from_stock = min(can_pack, own_cfc_stock) if cfc_items else 0
         cfc_from_po = can_pack - cfc_from_stock if cfc_items else 0
         ctn_from_stock = min(can_pack, own_ctn_stock) if ctn_items else 0
         ctn_from_po = can_pack - ctn_from_stock if ctn_items else 0
+
+        is_last_cfc = _is_last_user(fgk, cfc_items, last_cfc_user)
+        is_last_ctn = _is_last_user(fgk, ctn_items, last_ctn_user)
+
+        # Every FG but the true last user of a shared item shows only its
+        # own claim on it (from_stock/from_po); the last user shows the
+        # real remaining pool, so Total there can exceed its own Can Pack.
+        cfc_stock_cases = (own_cfc_stock if is_last_cfc else cfc_from_stock) if cfc_items else "-"
+        cfc_po_cases = (own_cfc_po if is_last_cfc else cfc_from_po) if cfc_items else "-"
+        ctn_stock_cases = (own_ctn_stock if is_last_ctn else ctn_from_stock) if ctn_items else "-"
+        ctn_po_cases = (own_ctn_po if is_last_ctn else ctn_from_po) if ctn_items else "-"
+        total_cfc_cases = (cfc_stock_cases + cfc_po_cases) if cfc_items else "-"
+        total_ctn_cases = (ctn_stock_cases + ctn_po_cases) if ctn_items else "-"
 
         for item, qty in cfc_items:
             k = item.upper()
@@ -137,9 +150,9 @@ def build_canpack(master_fgs, fg_cfc, fg_ctn, fg_brand, stock, canpack_rows, pen
         # a shared item, since nothing after it will deduct any further.
         leftover_cfc = round(sum(remaining_stock.get(i.upper(), 0.0) for i, _ in cfc_items)) if cfc_items else None
         leftover_ctn = round(sum(remaining_stock.get(i.upper(), 0.0) for i, _ in ctn_items)) if ctn_items else None
-        if leftover_cfc is not None and not _is_last_user(fgk, cfc_items, last_cfc_user):
+        if leftover_cfc is not None and not is_last_cfc:
             leftover_cfc = None
-        if leftover_ctn is not None and not _is_last_user(fgk, ctn_items, last_ctn_user):
+        if leftover_ctn is not None and not is_last_ctn:
             leftover_ctn = None
 
         toab = total_orders_bc.get(fgk, 0.0) if is_order else 0.0

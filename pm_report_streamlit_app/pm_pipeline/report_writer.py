@@ -687,10 +687,12 @@ def write_transaction_report_sheet(wb, items, by_item_week, weeks):
             cell.font, cell.border = DATA_FONT, BORDER
 
         week_cons_letters, week_floor_letters, week_store_letters, week_wo_letters = [], [], [], []
+        total_cons_v = 0.0
         for i, w in enumerate(weeks):
             c0 = START_COL + i * WEEK_BLOCK_WIDTH
             v = by_item_week.get((item["item_name"], w))
             cons_v = round(v["consumption"], 4) if v and v["consumption"] else None
+            total_cons_v += cons_v or 0.0
             floor_v = round(v["floor"], 4) if v and v["floor"] else None
             store_v = round(v["store"], 4) if v and v["store"] else None
             wo_v = round(v["writeoff"], 4) if v and v["writeoff"] else None
@@ -724,10 +726,12 @@ def write_transaction_report_sheet(wb, items, by_item_week, weeks):
         store_sum = "+".join(week_store_letters)
         wo_sum = "+".join(week_wo_letters)
         total_cons_cell = ws.cell(row_idx, SUMMARY_COL, f"={cons_sum}")
+        # same 0% fallback as the per-week columns: no Consumption across the
+        # whole window means 0% wastage-of-consumption, not a div/0 error
         floor_pct_cell = ws.cell(row_idx, SUMMARY_COL + 1,
-                                  f"=({floor_sum})/{total_cons_cell.coordinate}")
+                                  f"=({floor_sum})/{total_cons_cell.coordinate}" if total_cons_v else "=0/100%")
         store_pct_cell = ws.cell(row_idx, SUMMARY_COL + 2,
-                                  f"=({store_sum})/{total_cons_cell.coordinate}")
+                                  f"=({store_sum})/{total_cons_cell.coordinate}" if total_cons_v else "=0/100%")
         wo_pct_cell = ws.cell(row_idx, SUMMARY_COL + 3, f"=({wo_sum})/100")
         total_cons_cell.font, total_cons_cell.border, total_cons_cell.number_format = DATA_FONT, BORDER, NUM_FMT
         for cell in (floor_pct_cell, store_pct_cell, wo_pct_cell):

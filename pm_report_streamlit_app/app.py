@@ -122,11 +122,12 @@ with st.expander("What this does", expanded=False):
     - Pending PO: uses the curated "Outstanding Qty" format as-is when that's
       what you upload; if a full company-wide raw extract shows up instead, it
       automatically filters to Location Code = CBEPM only.
-    - **Wastage Summary** (optional upload): one row per item, with Floor
-      Wastage, Store Wastage, Total Wastage and Writeoff broken out week by
-      week for the last 4 completed weeks before the report date, plus a
-      Consumption / Total Wastage % / Writeoff % summary across that window
-      (the two percentages highlighted red above 2%).
+    - **Wastage Summary** (optional upload): one row per item, with
+      Consumption, Floor Wastage, Floor Wastage %, Store Wastage, Store
+      Wastage % and Writeoff, Writeoff % broken out for each of the last 4
+      completed weeks before the report date, plus a Consumed Qty / Floor
+      Wastage % / Store Wastage % / Writeoff % summary across that window
+      (every percentage highlighted red above 2%).
     """)
 
 st.markdown('<span class="jay-section-label">Step 1</span>', unsafe_allow_html=True)
@@ -157,11 +158,12 @@ st.markdown('<span class="jay-section-label">Step 3</span>', unsafe_allow_html=T
 st.subheader("Optional: Transaction Report")
 st.caption(
     "Raw Transaction Report export from the source system (.xlsb or .xlsx). "
-    "When uploaded, adds a **Wastage Summary** sheet: one row per item, "
-    "with Floor Wastage, Store Wastage, Total Wastage and Writeoff broken "
-    "out week by week for the last 4 completed weeks before the report date, "
-    "plus a Consumption / Total Wastage % / Writeoff % summary across that "
-    "window (the two percentages highlighted red above 2%)."
+    "When uploaded, adds a **Wastage Summary** sheet: one row per item, with "
+    "Consumption, Floor Wastage, Floor Wastage %, Store Wastage, Store "
+    "Wastage %, Writeoff and Writeoff % for each of the last 4 completed "
+    "weeks before the report date, plus a Consumed Qty / Floor Wastage % / "
+    "Store Wastage % / Writeoff % summary across that window (every "
+    "percentage highlighted red above 2%)."
 )
 transaction_report_file = st.file_uploader(
     "Transaction Report (optional)", type=["xlsb", "xlsx"], key="txn_report"

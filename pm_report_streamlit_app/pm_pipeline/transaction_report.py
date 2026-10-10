@@ -7,16 +7,16 @@ Accepts the raw Transaction Report export, either as the native .xlsb
 summary rows) is located by content, not by a fixed row number.
 
 Builds per (Doc_Date, Item_Name) rows with Floor Wastage / Store Wastage /
-Writeoff, using only the STOCKOUT leg of each transaction (every WASTAGE and
-WRITEOFF transaction has a paired STOCKIN leg for the same qty - counting
-both would double the total):
+Writeoff / Consumption, using only the STOCKOUT leg of each transaction
+(every WASTAGE, WRITEOFF and PROCESS transaction has a paired STOCKIN leg -
+counting both would double the total, and for PROCESS the STOCKIN leg isn't
+even a mirror of the same event, just a much smaller unrelated flow):
 
   Transaction Type == "WASTAGE"  -> wastage, split by From Warehouse:
       From Warehouse in {WH-PM-MDKCBE, WH-PM-MDKCBE2} -> Store Wastage
       every other From Warehouse                      -> Floor Wastage
   Transaction Type == "WRITEOFF" -> Writeoff (any warehouse)
-
-Total Wastage is always Floor Wastage + Store Wastage.
+  Transaction Type == "PROCESS"  -> Consumption (any warehouse)
 """
 from datetime import date, datetime, timedelta
 
@@ -84,7 +84,7 @@ def parse_transaction_report(file_obj):
     Returns a list of dicts sorted by (date, item name), one per
     (Doc_Date, Item_Name) combination that has nonzero activity:
       {date, item_name, uom, item_type,
-       floor_wastage, store_wastage, writeoff}
+       floor_wastage, store_wastage, writeoff, consumption}
     """
     name = (getattr(file_obj, "name", "") or "").lower()
     file_obj.seek(0)
@@ -95,7 +95,7 @@ def parse_transaction_report(file_obj):
 
     for r in rows:
         txn_type = str(r.get("Transaction Type") or "").strip().upper()
-        if txn_type not in ("WASTAGE", "WRITEOFF"):
+        if txn_type not in ("WASTAGE", "WRITEOFF", "PROCESS"):
             continue
         if str(r.get("Movement Type") or "").strip().upper() != "STOCKOUT":
             continue
@@ -121,10 +121,12 @@ def parse_transaction_report(file_obj):
 
         key = (d, item_name)
         if key not in agg:
-            agg[key] = {"floor": 0.0, "store": 0.0, "writeoff": 0.0}
+            agg[key] = {"floor": 0.0, "store": 0.0, "writeoff": 0.0, "consumption": 0.0}
 
         if txn_type == "WRITEOFF":
             agg[key]["writeoff"] += qty
+        elif txn_type == "PROCESS":
+            agg[key]["consumption"] += qty
         elif str(r.get("From Warehouse") or "").strip() in STORE_FROM_WAREHOUSES:
             agg[key]["store"] += qty
         else:
@@ -136,45 +138,9 @@ def parse_transaction_report(file_obj):
             "date": d, "item_name": item_name,
             "uom": item_uom.get(item_name, ""), "item_type": item_type.get(item_name, ""),
             "floor_wastage": round(v["floor"], 4), "store_wastage": round(v["store"], 4),
-            "writeoff": round(v["writeoff"], 4),
+            "writeoff": round(v["writeoff"], 4), "consumption": round(v["consumption"], 4),
         })
     return out
-
-
-def parse_consumption(file_obj):
-    """
-    Returns {item_name: {"qty", "uom", "item_type"}}: total Consumption per
-    item from Transaction Type == "PROCESS", STOCKOUT leg only - same
-    convention as Floor/Store Wastage (avoids double counting the paired
-    STOCKIN leg, which for PROCESS is a much smaller, unrelated flow rather
-    than a mirror of the same event, not a 1:1 pair).
-    """
-    name = (getattr(file_obj, "name", "") or "").lower()
-    file_obj.seek(0)
-    rows = _rows_from_xlsb(file_obj) if name.endswith(".xlsb") else _rows_from_xlsx(file_obj)
-
-    consumption = {}
-    for r in rows:
-        if str(r.get("Transaction Type") or "").strip().upper() != "PROCESS":
-            continue
-        if str(r.get("Movement Type") or "").strip().upper() != "STOCKOUT":
-            continue
-        item_name = r.get("Item_Name")
-        if not item_name:
-            continue
-        item_name = norm_disp(item_name)
-        try:
-            qty = float(r.get("Qty"))
-        except (TypeError, ValueError):
-            continue
-        if item_name not in consumption:
-            consumption[item_name] = {"qty": 0.0, "uom": r.get("UOM_Name") or "",
-                                       "item_type": r.get("Item_Type_Name") or ""}
-        consumption[item_name]["qty"] += qty
-
-    for v in consumption.values():
-        v["qty"] = round(v["qty"], 4)
-    return consumption
 
 
 def filter_last_n_completed_weeks(rows, today, n=6):
@@ -199,11 +165,12 @@ def last_n_completed_weeks(today, n=4):
 def pivot_weekwise(rows, weeks):
     """
     Pivots parse_transaction_report()'s per-(date, item) rows into one row
-    per item, with Floor/Store/Writeoff summed within each of the given
-    week numbers.
+    per item, with Floor/Store/Writeoff/Consumption summed within each of
+    the given week numbers - an item with real Consumption but no wastage
+    this period (or vice versa) still gets its own row.
     Returns (items, by_item_week):
       items: sorted list of {item_name, uom, item_type}
-      by_item_week: {(item_name, week): {floor, store, writeoff}}
+      by_item_week: {(item_name, week): {floor, store, writeoff, consumption}}
     """
     weeks_set = set(weeks)
     by_item_week = {}
@@ -215,28 +182,14 @@ def pivot_weekwise(rows, weeks):
         item_meta.setdefault(r["item_name"], {"uom": r["uom"], "item_type": r["item_type"]})
         key = (r["item_name"], w)
         if key not in by_item_week:
-            by_item_week[key] = {"floor": 0.0, "store": 0.0, "writeoff": 0.0}
+            by_item_week[key] = {"floor": 0.0, "store": 0.0, "writeoff": 0.0, "consumption": 0.0}
         by_item_week[key]["floor"] += r["floor_wastage"]
         by_item_week[key]["store"] += r["store_wastage"]
         by_item_week[key]["writeoff"] += r["writeoff"]
+        by_item_week[key]["consumption"] += r["consumption"]
 
     items = [{"item_name": name, **meta} for name, meta in sorted(item_meta.items())]
     return items, by_item_week
-
-
-def merge_item_universe(items, consumption):
-    """
-    Combines pivot_weekwise()'s item list with parse_consumption()'s item
-    dict into one sorted list covering every item that has either wastage/
-    writeoff activity or Consumption - an item with real Consumption but no
-    wastage this period still needs a row (0% wastage), and vice versa.
-    """
-    by_name = {it["item_name"]: {"item_name": it["item_name"], "uom": it["uom"],
-                                  "item_type": it["item_type"]} for it in items}
-    for name, meta in consumption.items():
-        if name not in by_name:
-            by_name[name] = {"item_name": name, "uom": meta["uom"], "item_type": meta["item_type"]}
-    return [by_name[k] for k in sorted(by_name.keys())]
 
 
 def week_label(w):

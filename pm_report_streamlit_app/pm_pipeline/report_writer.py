@@ -589,22 +589,24 @@ def write_orders_sheet(wb, src_file, generated_on):
 
 
 # ---------------------------------------------------------------------------
-def write_transaction_report_sheet(wb, items, by_item_week, weeks, consumption=None):
+def write_transaction_report_sheet(wb, items, by_item_week, weeks):
     """
     Optional "Wastage Summary" sheet, only written when a Transaction Report
-    was uploaded. Week-wise pivot: one row per item, with a 4-column block
-    (Floor Wastage, Store Wastage, Total Wastage, Writeoff) per week, oldest
-    week first, plus a trailing summary block (Consumption, Total Wastage %,
-    Writeoff %) across the whole window. The week-block header (row 1)
-    carries that week's own date range and alternates two fill colors so
-    adjacent weeks are easy to tell apart; the summary block gets a third
-    color. Total Wastage % turns red (font + fill) wherever it exceeds 2%,
-    same for Writeoff %.
+    was uploaded. Week-wise pivot: one row per item, with a 7-column block
+    per week (Consumption, Floor Wastage, Floor Wastage %, Store Wastage,
+    Store Wastage %, Writeoff, Writeoff %), oldest week first, plus a
+    trailing summary block (Consumed Qty, Floor Wastage %, Store Wastage %,
+    Writeoff %) across the whole window. Each week's own Floor/Store % is
+    that week's own Floor/Store divided by that week's own Consumption;
+    Writeoff % is always /100. The summary block's Floor/Store % divide the
+    4-week sums by the 4-week Consumed Qty; its Writeoff % is also /100. The
+    week-block header (row 1) carries that week's own date range and
+    alternates two fill colors so adjacent weeks are easy to tell apart; the
+    summary block gets a third color. Every %-column turns red (font + fill)
+    wherever it's strictly greater than 2%.
     """
     from openpyxl.formatting.rule import CellIsRule
     from .transaction_report import week_label
-
-    consumption = consumption or {}
 
     sheet_name = "Wastage Summary"
     for old_name in ("Wastage Summary", "Transaction Report"):
@@ -638,41 +640,42 @@ def write_transaction_report_sheet(wb, items, by_item_week, weeks, consumption=N
 
     HEADER_ROW = 2
     START_COL = 4  # D
-    SUMMARY_COL = START_COL + len(weeks) * 4
+    WEEK_BLOCK_WIDTH = 7
+    SUMMARY_COL = START_COL + len(weeks) * WEEK_BLOCK_WIDTH
 
     for i, w in enumerate(weeks):
-        c0 = START_COL + i * 4
-        ws.merge_cells(start_row=1, start_column=c0, end_row=1, end_column=c0 + 3)
+        c0 = START_COL + i * WEEK_BLOCK_WIDTH
+        ws.merge_cells(start_row=1, start_column=c0, end_row=1, end_column=c0 + WEEK_BLOCK_WIDTH - 1)
         cell = ws.cell(1, c0, week_label(w))
         cell.font, cell.alignment = HEADER_FONT, CENTER
         fill = WEEK_FILLS[i % 2]
-        for cc in range(c0, c0 + 4):
+        for cc in range(c0, c0 + WEEK_BLOCK_WIDTH):
             ws.cell(1, cc).fill = fill
             ws.cell(1, cc).border = BORDER
 
-    ws.merge_cells(start_row=1, start_column=SUMMARY_COL, end_row=1, end_column=SUMMARY_COL + 2)
-    title_cell = ws.cell(1, SUMMARY_COL, f"Week {weeks[0]} -{weeks[-1]}")
+    ws.merge_cells(start_row=1, start_column=SUMMARY_COL, end_row=1, end_column=SUMMARY_COL + 3)
+    title_cell = ws.cell(1, SUMMARY_COL, f"Week {weeks[0]} - Week {weeks[-1]}")
     title_cell.font, title_cell.alignment = HEADER_FONT, CENTER
-    for cc in range(SUMMARY_COL, SUMMARY_COL + 3):
+    for cc in range(SUMMARY_COL, SUMMARY_COL + 4):
         ws.cell(1, cc).fill = SUMMARY_TITLE_FILL
         ws.cell(1, cc).border = BORDER
 
     for col, h in enumerate(["Item Name", "UOM", "Item Type"], start=1):
         cell = ws.cell(HEADER_ROW, col, h)
         cell.font, cell.fill, cell.alignment, cell.border = HEADER_FONT, BASE_FILL, CENTER, BORDER
+    WEEK_SUBHEADERS = ["Consumption", "Floor Wastage", "Floor Wastage %",
+                       "Store Wastage", "Store Wastage %", "Writeoff", "Writeoff %"]
     for i, w in enumerate(weeks):
-        c0 = START_COL + i * 4
-        for j, h in enumerate(["Floor Wastage", "Store Wastage", "Total Wastage", "Writeoff"]):
+        c0 = START_COL + i * WEEK_BLOCK_WIDTH
+        for j, h in enumerate(WEEK_SUBHEADERS):
             cell = ws.cell(HEADER_ROW, c0 + j, h)
             cell.font, cell.fill, cell.alignment, cell.border = HEADER_FONT, SUBHEADER_FILL, CENTER, BORDER
-    for j, h in enumerate(["Consumption", "Total Wastage", "Writeoff"]):
+    for j, h in enumerate(["Consumed Qty", "Floor Wastage %", "Store Wastage %", "Writeoff %"]):
         cell = ws.cell(HEADER_ROW, SUMMARY_COL + j, h)
         cell.font, cell.fill, cell.alignment, cell.border = HEADER_FONT, SUMMARY_HEADER_FILL, CENTER, BORDER
     ws.row_dimensions[HEADER_ROW].height = 24
 
-    total_cols = [get_column_letter(START_COL + i * 4 + 2) for i in range(len(weeks))]
-    writeoff_cols = [get_column_letter(START_COL + i * 4 + 3) for i in range(len(weeks))]
-    cons_letter = get_column_letter(SUMMARY_COL)
+    pct_col_letters = []  # every %-column, for conditional formatting
 
     row_idx = HEADER_ROW + 1
     for item in items:
@@ -682,42 +685,62 @@ def write_transaction_report_sheet(wb, items, by_item_week, weeks, consumption=N
         for c in (1, 2, 3):
             cell = ws.cell(row_idx, c)
             cell.font, cell.border = DATA_FONT, BORDER
+
+        week_cons_letters, week_floor_letters, week_store_letters, week_wo_letters = [], [], [], []
         for i, w in enumerate(weeks):
-            c0 = START_COL + i * 4
+            c0 = START_COL + i * WEEK_BLOCK_WIDTH
             v = by_item_week.get((item["item_name"], w))
+            cons_v = round(v["consumption"], 4) if v and v["consumption"] else None
             floor_v = round(v["floor"], 4) if v and v["floor"] else None
             store_v = round(v["store"], 4) if v and v["store"] else None
             wo_v = round(v["writeoff"], 4) if v and v["writeoff"] else None
-            floor_cell = ws.cell(row_idx, c0, floor_v)
-            store_cell = ws.cell(row_idx, c0 + 1, store_v)
-            total_cell = ws.cell(row_idx, c0 + 2, f"={floor_cell.coordinate}+{store_cell.coordinate}")
-            wo_cell = ws.cell(row_idx, c0 + 3, wo_v)
-            for cell in (floor_cell, store_cell, total_cell, wo_cell):
-                cell.font, cell.border, cell.number_format = DATA_FONT, BORDER, NUM_FMT
 
-        cons = consumption.get(item["item_name"])
-        cons_qty = cons["qty"] if cons else None
-        cons_cell = ws.cell(row_idx, SUMMARY_COL, cons_qty or None)
-        total_sum = "+".join(f"{c}{row_idx}" for c in total_cols)
-        wo_sum = "+".join(f"{c}{row_idx}" for c in writeoff_cols)
-        # avoid #DIV/0! when there's no Consumption this period - a 0
-        # denominator means 0% wastage-of-consumption, not an error
-        twp_formula = (f"=({total_sum})/{cons_letter}{row_idx}" if cons_qty
-                       else "=0/100%")
-        twp_cell = ws.cell(row_idx, SUMMARY_COL + 1, twp_formula)
-        wop_cell = ws.cell(row_idx, SUMMARY_COL + 2, f"=({wo_sum})/100")
-        cons_cell.font, cons_cell.border, cons_cell.number_format = DATA_FONT, BORDER, NUM_FMT
-        twp_cell.font, twp_cell.border, twp_cell.number_format = DATA_FONT, BORDER, PCT_FMT
-        wop_cell.font, wop_cell.border, wop_cell.number_format = DATA_FONT, BORDER, PCT_FMT
+            cons_cell = ws.cell(row_idx, c0, cons_v)
+            floor_cell = ws.cell(row_idx, c0 + 1, floor_v)
+            # avoid #DIV/0! when there's no Consumption this week - a 0
+            # denominator means 0% wastage-of-consumption, not an error
+            floor_pct = ws.cell(row_idx, c0 + 2,
+                                 f"={floor_cell.coordinate}/{cons_cell.coordinate}" if cons_v else "=0/100%")
+            store_cell = ws.cell(row_idx, c0 + 3, store_v)
+            store_pct = ws.cell(row_idx, c0 + 4,
+                                 f"={store_cell.coordinate}/{cons_cell.coordinate}" if cons_v else "=0/100%")
+            wo_cell = ws.cell(row_idx, c0 + 5, wo_v)
+            wo_pct = ws.cell(row_idx, c0 + 6, f"={wo_cell.coordinate}/100")
+
+            for cell in (cons_cell, floor_cell, store_cell, wo_cell):
+                cell.font, cell.border, cell.number_format = DATA_FONT, BORDER, NUM_FMT
+            for cell in (floor_pct, store_pct, wo_pct):
+                cell.font, cell.border, cell.number_format = DATA_FONT, BORDER, PCT_FMT
+            if row_idx == HEADER_ROW + 1:
+                pct_col_letters += [floor_pct.column_letter, store_pct.column_letter, wo_pct.column_letter]
+
+            week_cons_letters.append(cons_cell.coordinate)
+            week_floor_letters.append(floor_cell.coordinate)
+            week_store_letters.append(store_cell.coordinate)
+            week_wo_letters.append(wo_cell.coordinate)
+
+        cons_sum = "+".join(week_cons_letters)
+        floor_sum = "+".join(week_floor_letters)
+        store_sum = "+".join(week_store_letters)
+        wo_sum = "+".join(week_wo_letters)
+        total_cons_cell = ws.cell(row_idx, SUMMARY_COL, f"={cons_sum}")
+        floor_pct_cell = ws.cell(row_idx, SUMMARY_COL + 1,
+                                  f"=({floor_sum})/{total_cons_cell.coordinate}")
+        store_pct_cell = ws.cell(row_idx, SUMMARY_COL + 2,
+                                  f"=({store_sum})/{total_cons_cell.coordinate}")
+        wo_pct_cell = ws.cell(row_idx, SUMMARY_COL + 3, f"=({wo_sum})/100")
+        total_cons_cell.font, total_cons_cell.border, total_cons_cell.number_format = DATA_FONT, BORDER, NUM_FMT
+        for cell in (floor_pct_cell, store_pct_cell, wo_pct_cell):
+            cell.font, cell.border, cell.number_format = DATA_FONT, BORDER, PCT_FMT
+        if row_idx == HEADER_ROW + 1:
+            pct_col_letters += [floor_pct_cell.column_letter, store_pct_cell.column_letter, wo_pct_cell.column_letter]
         row_idx += 1
 
     last_row = row_idx - 1
-    last_col_letter = get_column_letter(SUMMARY_COL + 2)
+    last_col_letter = get_column_letter(SUMMARY_COL + 3)
     ws.auto_filter.ref = f"A{HEADER_ROW}:{last_col_letter}{last_row}"
 
-    twp_letter = get_column_letter(SUMMARY_COL + 1)
-    wop_letter = get_column_letter(SUMMARY_COL + 2)
-    for col_letter in (twp_letter, wop_letter):
+    for col_letter in pct_col_letters:
         rule = CellIsRule(operator="greaterThan", formula=["0.02"], stopIfTrue=False,
                            font=RED_FONT, fill=RED_FILL)
         ws.conditional_formatting.add(f"{col_letter}{HEADER_ROW + 1}:{col_letter}{last_row}", rule)
@@ -725,9 +748,9 @@ def write_transaction_report_sheet(wb, items, by_item_week, weeks, consumption=N
     ws.column_dimensions["A"].width = 55
     ws.column_dimensions["B"].width = 8
     ws.column_dimensions["C"].width = 14
-    ws.column_dimensions[cons_letter].width = 13
-    ws.column_dimensions[twp_letter].width = 13
-    ws.column_dimensions[wop_letter].width = 13
+    for col_letter in pct_col_letters:
+        ws.column_dimensions[col_letter].width = 13
+    ws.column_dimensions[get_column_letter(SUMMARY_COL)].width = 13
     ws.freeze_panes = f"D{HEADER_ROW + 1}"
 
 

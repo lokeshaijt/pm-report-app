@@ -31,16 +31,82 @@ accounted for. Only the true last FG (in sheet order) still drawing on that
 item shows the real remaining pool, since it's the only one whose number
 won't be made stale by someone claiming more after it. An item not shared
 with anyone is trivially its own "last user", so this never changes its
-numbers. Leftover CFC/CTN is the actual PIECES left over in the Stock pool
-once the whole chain is done with a shared item - not a case count, since a
-material can be the binding constraint (0 cases of case-level "slack")
-while still leaving a handful of pieces that don't add up to one more case.
-It's likewise shown only on that same true last FG.
+numbers. Leftover CFC/CTN is the actual PIECES left over once the whole
+chain is done with a shared item - Stock pool and Pending PO pool combined,
+since both are real pieces nobody's Can Pack claimed - not a case count,
+since a material can be the binding constraint (0 cases of case-level
+"slack") while still leaving a handful of pieces that don't add up to one
+more case. It's likewise shown only on that same true last FG.
 
 This sheet deliberately ignores date/week windowing - Total Available Sale
 Orders BC is summed across the *entire* order book, no cutoff.
+
+fg_cfc/fg_ctn (build_fg_component_maps below) are built from the *full*
+merged BOM - main BOM plus every supplemental source - not just the main
+BOM, so a component defined only in a supplemental BOM still shows up here.
+The CFC bucket already folds in TRAY items (an FG packs one or the other,
+never both); the CTN bucket falls back to that FG's LAMINATED-ROLLS or
+POUCH items when it has no real CTN entry, since some lines are packed into
+laminated rolls or pouches instead of cartons.
 """
 import math
+
+from .utils import norm, norm_disp
+
+CFC_LIKE_GROUPS = {"CFC", "TRAY"}
+CTN_GROUPS = {"CTN"}
+CTN_FALLBACK_GROUPS = {"LAMINATED-ROLLS", "POUCH"}
+
+
+def build_fg_component_maps(all_raw_rows, merged_item_meta):
+    """
+    Builds fg_cfc/fg_ctn from the *full* merged BOM (main + every
+    supplemental source), not just the main BOM - a component defined only
+    in a supplemental BOM (e.g. a newly added brand's CFC/CTN/TRAY items)
+    is otherwise invisible to Can Pack even though it's in the FG universe
+    everywhere else.
+
+    CFC bucket: item_group CFC or TRAY - an FG packs either one or the
+    other, never both, so merging them unconditionally is equivalent to
+    "use TRAY when there's no CFC entry" for every real case.
+
+    CTN bucket: item_group CTN when the FG has one. When it doesn't, falls
+    back to that FG's LAMINATED-ROLLS or POUCH items instead - some FG
+    lines are packed into laminated rolls or pouches rather than cartons,
+    and without this fallback those FGs show no CTN capacity at all.
+    """
+    fg_cfc, fg_ctn, fg_ctn_fallback = {}, {}, {}
+    seen = set()
+    for fg, item, qty in all_raw_rows:
+        itemk = norm(item)
+        meta = merged_item_meta.get(itemk)
+        if not meta:
+            continue
+        # item_meta tuples are (item_type, item_group) despite load_bom's own
+        # local variable names - verified against real BOM data, where e.g.
+        # "ENV AFRICA CHOICE..." stores ('PM-SPECIFIC', 'ENV').
+        _item_type, item_group = meta
+        if not item_group:
+            continue
+        fgk = norm(fg)
+        qtyk = round(float(qty), 8) if qty is not None else 0
+        # the same (FG, item, qty) combo can appear in both the main and a
+        # supplemental BOM - count it once, same dedup build_pm_universe uses
+        dedupe_key = (fgk, itemk, qtyk)
+        if dedupe_key in seen:
+            continue
+        seen.add(dedupe_key)
+        if item_group in CFC_LIKE_GROUPS:
+            fg_cfc.setdefault(fgk, []).append((norm_disp(item), qty))
+        elif item_group in CTN_GROUPS:
+            fg_ctn.setdefault(fgk, []).append((norm_disp(item), qty))
+        elif item_group in CTN_FALLBACK_GROUPS:
+            fg_ctn_fallback.setdefault(fgk, []).append((norm_disp(item), qty))
+
+    for fgk, items in fg_ctn_fallback.items():
+        fg_ctn.setdefault(fgk, items)
+
+    return fg_cfc, fg_ctn
 
 
 def _cap_from_pool(items, pool):
@@ -145,11 +211,14 @@ def build_canpack(master_fgs, fg_cfc, fg_ctn, fg_brand, stock, canpack_rows, pen
             remaining_stock[k] = remaining_stock.get(k, 0.0) - ctn_from_stock * (qty or 0)
             remaining_po[k] = remaining_po.get(k, 0.0) - ctn_from_po * (qty or 0)
 
-        # Leftover = actual pieces left in the Stock pool, read right after
-        # this row's own Stock deduction - correct for the true last user of
-        # a shared item, since nothing after it will deduct any further.
-        leftover_cfc = round(sum(remaining_stock.get(i.upper(), 0.0) for i, _ in cfc_items)) if cfc_items else None
-        leftover_ctn = round(sum(remaining_stock.get(i.upper(), 0.0) for i, _ in ctn_items)) if ctn_items else None
+        # Leftover = actual pieces left in the Stock pool *and* the Pending
+        # PO pool, read right after this row's own deduction from both -
+        # correct for the true last user of a shared item, since nothing
+        # after it will deduct any further.
+        leftover_cfc = round(sum(remaining_stock.get(i.upper(), 0.0) + remaining_po.get(i.upper(), 0.0)
+                                  for i, _ in cfc_items)) if cfc_items else None
+        leftover_ctn = round(sum(remaining_stock.get(i.upper(), 0.0) + remaining_po.get(i.upper(), 0.0)
+                                  for i, _ in ctn_items)) if ctn_items else None
         if leftover_cfc is not None and not is_last_cfc:
             leftover_cfc = None
         if leftover_ctn is not None and not is_last_ctn:

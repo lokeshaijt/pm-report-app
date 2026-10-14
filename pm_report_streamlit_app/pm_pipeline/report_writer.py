@@ -110,12 +110,35 @@ def write_canpack_sheet(wb, rows):
         cell.font, cell.fill, cell.border, cell.alignment = t["font"], t["fill"], t["border"], t["alignment"]
         cell.number_format = t["number_format"]
 
+    # Total CFC/CTN, Can Pack and Short/Excess are plain row-level arithmetic
+    # on the Stock/PO cells already written in that same row, so they're
+    # written as live formulas rather than baked-in numbers - edit a Stock or
+    # PO cell in Excel and these recalculate. CFC/CTN Stock, Pending PO and
+    # Leftover stay computed values: they're the output of the cascading
+    # shared-pool depletion across every row above (build_canpack), which
+    # isn't expressible as a per-row formula.
     row_idx = TEMPLATE_ROW
     for r in rows:
+        has_cfc = r["cfc_stock_cases"] != "-"
+        has_ctn = r["ctn_stock_cases"] != "-"
+        r_cell = row_idx
+
+        total_cfc_val = f"=E{r_cell}+F{r_cell}" if has_cfc else "-"
+        total_ctn_val = f"=H{r_cell}+I{r_cell}" if has_ctn else "-"
+        if has_cfc and has_ctn:
+            can_pack_val = f"=MIN(G{r_cell},J{r_cell})"
+        elif has_cfc:
+            can_pack_val = f"=G{r_cell}"
+        elif has_ctn:
+            can_pack_val = f"=J{r_cell}"
+        else:
+            can_pack_val = 0
+        short_excess_val = f"=K{r_cell}-D{r_cell}"
+
         vals = [r["fg"], r["brand"], r["order_flag"], r["total_orders_bc"],
-                r["cfc_stock_cases"], r["cfc_po_cases"], r["total_cfc_cases"],
-                r["ctn_stock_cases"], r["ctn_po_cases"], r["total_ctn_cases"],
-                r["can_pack"], r["short_excess"],
+                r["cfc_stock_cases"], r["cfc_po_cases"], total_cfc_val,
+                r["ctn_stock_cases"], r["ctn_po_cases"], total_ctn_val,
+                can_pack_val, short_excess_val,
                 r["leftover_cfc"] if r["leftover_cfc"] is not None else "-",
                 r["leftover_ctn"] if r["leftover_ctn"] is not None else "-"]
         for col, val in enumerate(vals, start=1):

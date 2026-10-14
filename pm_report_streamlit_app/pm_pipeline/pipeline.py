@@ -10,11 +10,11 @@ from . import reference_data as ref
 from .stock import parse_stock
 from .pending_po import parse_pending_po
 from .orders import combine_demand
-from .pm_universe import build_pm_universe
+from .pm_universe import build_pm_universe, merge_bom
 from .possible_error import build_possible_error
 from .demand import aggregate_weekly, aggregate_monthly
 from .cascade import explode_demand, run_cascade, consolidate_shortfall
-from .canpack import build_canpack
+from .canpack import build_canpack, build_fg_component_maps
 from .weeks import build_week_window, build_month_window
 from .transaction_report import parse_transaction_report, last_n_completed_weeks, pivot_weekwise
 from . import report_writer as rw
@@ -50,7 +50,7 @@ def generate_report(export_file, domestic_file, pending_po_file, stock_file,
 
     # ---- 1. Reference data (bundled, static) ----
     prog(0.05, "Loading reference data (BOM, Can Pack master, Nav codes)...")
-    raw_bom_rows, item_meta, fg_brand, uom_map, fg_cfc, fg_ctn = ref.load_bom()
+    raw_bom_rows, item_meta, fg_brand, uom_map, _main_fg_cfc, _main_fg_ctn = ref.load_bom()
     supp_bundled_rows, supp_bundled_brand = ref.load_supplemental_bom(
         f"{ref.DATA_DIR}/Exploded_BOM_Supplemental.xlsx"
     )
@@ -64,6 +64,12 @@ def generate_report(export_file, domestic_file, pending_po_file, stock_file,
         extra_rows, extra_brand = ref.load_supplemental_bom(supplemental_bom_file)
         fg_brand.update(extra_brand)
         supplemental_lists.append(extra_rows)
+
+    # fg_cfc/fg_ctn (for Can Pack) are built from the *full* merged BOM - main
+    # plus every supplemental source - so a CFC/CTN/TRAY/Laminates/Pouch
+    # component defined only in a supplemental BOM is still picked up.
+    all_bom_rows, merged_item_meta = merge_bom(raw_bom_rows, item_meta, supplemental_lists)
+    fg_cfc, fg_ctn = build_fg_component_maps(all_bom_rows, merged_item_meta)
 
     # ---- 2. Parse the 4 uploaded files ----
     prog(0.15, "Parsing Stock Report...")

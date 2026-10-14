@@ -128,6 +128,10 @@ def infer_meta(item_name):
         return ("PM-SPECIFIC", "LAMINATED-ROLLS")
     if n.startswith("LABEL "):
         return ("PM-GENERIC", "LABEL")
+    if n.startswith("TRAY "):
+        return ("PM-SPECIFIC", "TRAY")
+    if n.startswith("POUCH "):
+        return ("PM-SPECIFIC", "POUCH")
     return (None, None)
 
 

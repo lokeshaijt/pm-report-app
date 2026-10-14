@@ -24,6 +24,33 @@ from .utils import norm, norm_disp
 from .reference_data import fmt_item_type, infer_meta
 
 
+def merge_bom(main_raw_rows, item_meta, supplemental_raw_rows_list=None):
+    """
+    Combines the main BOM's raw rows with however many supplemental BOM row
+    lists (the bundled standing merge, plus optionally a runtime-uploaded
+    one), inferring (item_group, item_type) for any component name the main
+    BOM doesn't already have metadata for. Shared by build_pm_universe (the
+    weekly/monthly/Laminates item universe) and build_canpack (the CFC/CTN/
+    TRAY/Laminates/Pouch pools), so a component added only via supplemental
+    BOM is recognized everywhere, not just in the cascade sheets.
+
+    Returns: (all_raw_rows, merged_item_meta) - merged_item_meta is a new
+    dict, safe to mutate without affecting the caller's main-BOM item_meta.
+    """
+    item_meta = dict(item_meta)
+    all_raw_rows = list(main_raw_rows)
+
+    for supp_rows in (supplemental_raw_rows_list or []):
+        for fg, item, qty in supp_rows:
+            itemk = norm(item)
+            if itemk not in item_meta:
+                grp, typ = infer_meta(item)
+                item_meta[itemk] = (grp, typ)
+            all_raw_rows.append((fg, item, qty))
+
+    return all_raw_rows, item_meta
+
+
 def build_pm_universe(main_raw_rows, item_meta, supplemental_raw_rows_list=None):
     """
     main_raw_rows: list of (fg, item, qty) from the main BOM.
@@ -35,16 +62,7 @@ def build_pm_universe(main_raw_rows, item_meta, supplemental_raw_rows_list=None)
     Returns: pm_items, fg_names_in_bom (the full merged FG universe, used by
     the Possible Error sheet to know which order-active FGs are still missing).
     """
-    item_meta = dict(item_meta)  # don't mutate the caller's dict
-    all_raw_rows = list(main_raw_rows)
-
-    for supp_rows in (supplemental_raw_rows_list or []):
-        for fg, item, qty in supp_rows:
-            itemk = norm(item)
-            if itemk not in item_meta:
-                grp, typ = infer_meta(item)
-                item_meta[itemk] = (grp, typ)
-            all_raw_rows.append((fg, item, qty))
+    all_raw_rows, item_meta = merge_bom(main_raw_rows, item_meta, supplemental_raw_rows_list)
 
     fg_names_in_bom = {norm(fg) for fg, item, qty in all_raw_rows}
 

@@ -7,9 +7,15 @@ The source file's layout has varied run to run:
     column A, then one column per warehouse, then Grand Total
     - sometimes with all 4 target warehouses as columns, sometimes with only
       the ones that have nonzero stock (missing columns just mean 0 for that WH)
+    - sometimes with *extra*, non-target warehouse columns too (e.g.
+      WH-FG-MDKCBE/2, finished-goods warehouses, seen from 15-Oct-2026) -
+      these must be excluded, not folded in
 
-Current stock is always: sum of on-hand quantity across exactly these 4 locations,
-which for a pivot sheet is simply its own Grand Total column.
+Current stock is always: sum of on-hand quantity across exactly these 4
+locations. For a raw dump sheet that's a straightforward filter on
+Warehouse_Name; for a pivot sheet it's the sum of whichever target-warehouse
+columns are present - never the sheet's own Grand Total, since that also
+includes any extra non-target warehouse columns the pivot happens to carry.
 """
 import openpyxl
 from collections import defaultdict
@@ -81,15 +87,25 @@ def parse_stock(file_obj) -> dict:
                 break
             headers.append(v)
             c += 1
-        try:
-            grand_total_col = headers.index("Grand Total") + 1
-        except ValueError:
-            grand_total_col = len(headers)
+        # Sum only the 4 target-warehouse columns actually present, never the
+        # sheet's own Grand Total - a pivot can carry extra non-PM warehouse
+        # columns (e.g. WH-FG-MDKCBE/2, finished-goods warehouses) alongside
+        # the target ones, and Grand Total includes those too. A handful of
+        # items genuinely sit in both a target PM warehouse and an FG
+        # warehouse, so blindly using Grand Total overstates their stock.
+        target_cols = [i + 1 for i, h in enumerate(headers) if h in TARGET_LOCATIONS]
+        if not target_cols:
+            # no recognizable target-warehouse column at all - fall back to
+            # Grand Total rather than silently reporting zero stock for everything
+            try:
+                target_cols = [headers.index("Grand Total") + 1]
+            except ValueError:
+                target_cols = [len(headers)]
         for row in ws.iter_rows(min_row=header_row + 1, values_only=True):
             name = row[0]
             if not name or str(name).strip().lower() == "grand total":
                 continue
-            stock[norm(name)] = row[grand_total_col - 1] or 0
+            stock[norm(name)] = sum(row[col - 1] or 0 for col in target_cols)
         return dict(stock)
 
     return dict(stock)  # nothing found - empty, will surface as all-zero stock

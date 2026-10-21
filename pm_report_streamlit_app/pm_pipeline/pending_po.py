@@ -3,10 +3,13 @@ Pending Purchase Order parser.
 
 Two formats have been seen from the source system:
   1. Curated "Outstanding Qty" sheet (most common): Document No, Order Date,
-     Customer Code, Customer Name, Item No, Item Description, Delivery Date,
-     Quantity, Outstanding Quantity, Unit Cost - 10 columns, no Location Code.
-     This appears to already be pre-scoped to PM-relevant purchases; every row
-     is used as-is.
+     [Customer Code,] Customer Name, Item No, Item Description, Delivery Date,
+     Quantity, Outstanding Quantity[, Unit Cost] - no Location Code. The exact
+     column count and position have drifted between runs (e.g. 20-Oct-2026
+     dropped Customer Code, shifting every later column left by one), so
+     columns are located by header name, never by a fixed index. This format
+     appears to already be pre-scoped to PM-relevant purchases; every row is
+     used as-is.
   2. Full company-wide raw extract (seen once, 18-Sep-2026): 18 columns
      including Location Code, mixed with completely unrelated company
      purchases (steel pipes, printer parts, etc). When this format appears,
@@ -22,31 +25,34 @@ from .utils import norm, to_float
 from .weeks import parse_date
 
 CBEPM_LOCATION = "CBEPM"
+REQUIRED_HEADERS = ("Item Description", "Delivery Date", "Outstanding Quantity")
 
 
 def _find_po_sheet_and_format(wb):
     """
     Returns (ws, format, header_row, col_map) where format is 'curated' or 'raw'.
     col_map keys: item_desc, delivery_date, outstanding, location_code (raw only).
+    Columns are always located by header name (scanned across a generous
+    column range, on whichever row actually carries the header), since the
+    curated format's exact column count/position has drifted between runs.
     """
     for name in wb.sheetnames:
         ws = wb[name]
-        # curated format: header on row 1
-        header1 = [ws.cell(1, c).value for c in range(1, 11)]
-        if header1[5] == "Item Description" and header1[6] == "Delivery Date":
-            return ws, "curated", 1, {"item_desc": 6, "delivery_date": 7, "outstanding": 9}
-        # raw format: header row varies (commonly row 13), scan for it
         for r in range(1, 20):
-            header = [ws.cell(r, c).value for c in range(1, 19)]
-            if "Item Description" in header and "Delivery Date" in header and "Location Code" in header:
-                col_map = {
-                    "item_desc": header.index("Item Description") + 1,
-                    "delivery_date": header.index("Delivery Date") + 1,
-                    "outstanding": header.index("Outstanding Quantity") + 1,
-                    "location_code": header.index("Location Code") + 1,
-                }
+            header = [ws.cell(r, c).value for c in range(1, 25)]
+            if not all(h in header for h in REQUIRED_HEADERS):
+                continue
+            col_map = {
+                "item_desc": header.index("Item Description") + 1,
+                "delivery_date": header.index("Delivery Date") + 1,
+                "outstanding": header.index("Outstanding Quantity") + 1,
+            }
+            if "Location Code" in header:
+                col_map["location_code"] = header.index("Location Code") + 1
                 return ws, "raw", r, col_map
-    # fall back to the last sheet, assume curated layout at row 1
+            return ws, "curated", r, col_map
+    # fall back to the last sheet, assume curated layout at row 1, old
+    # 10-column positions - better than refusing to parse at all
     ws = wb[wb.sheetnames[-1]]
     return ws, "curated", 1, {"item_desc": 6, "delivery_date": 7, "outstanding": 9}
 

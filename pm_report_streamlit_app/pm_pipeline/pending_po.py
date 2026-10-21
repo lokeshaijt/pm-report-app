@@ -6,10 +6,12 @@ Two formats have been seen from the source system:
      [Customer Code,] Customer Name, Item No, Item Description, Delivery Date,
      Quantity, Outstanding Quantity[, Unit Cost] - no Location Code. The exact
      column count and position have drifted between runs (e.g. 20-Oct-2026
-     dropped Customer Code, shifting every later column left by one), so
-     columns are located by header name, never by a fixed index. This format
-     appears to already be pre-scoped to PM-relevant purchases; every row is
-     used as-is.
+     dropped Customer Code, shifting every later column left by one), and the
+     "Outstanding Quantity" column has also appeared under the shorter name
+     "Outstanding Qty" - so columns are located by header name (matched
+     against every known spelling, see HEADER_SYNONYMS below), never by a
+     fixed index. This format appears to already be pre-scoped to
+     PM-relevant purchases; every row is used as-is.
   2. Full company-wide raw extract (seen once, 18-Sep-2026): 18 columns
      including Location Code, mixed with completely unrelated company
      purchases (steel pipes, printer parts, etc). When this format appears,
@@ -25,7 +27,24 @@ from .utils import norm, to_float
 from .weeks import parse_date
 
 CBEPM_LOCATION = "CBEPM"
-REQUIRED_HEADERS = ("Item Description", "Delivery Date", "Outstanding Quantity")
+# Each required field may appear under more than one header spelling (e.g.
+# the source system has used both "Outstanding Quantity" and the shorter
+# "Outstanding Qty"). Matching is by normalized name (case/whitespace
+# insensitive, via utils.norm), never by position, so any of these variants
+# is recognized regardless of which column it lands in.
+HEADER_SYNONYMS = {
+    "item_desc": ["Item Description"],
+    "delivery_date": ["Delivery Date"],
+    "outstanding": ["Outstanding Quantity", "Outstanding Qty"],
+}
+LOCATION_CODE_HEADER = "Location Code"
+
+
+def _find_header_col(normalized_header, synonyms):
+    for syn in synonyms:
+        if norm(syn) in normalized_header:
+            return normalized_header.index(norm(syn)) + 1
+    return None
 
 
 def _find_po_sheet_and_format(wb):
@@ -33,22 +52,25 @@ def _find_po_sheet_and_format(wb):
     Returns (ws, format, header_row, col_map) where format is 'curated' or 'raw'.
     col_map keys: item_desc, delivery_date, outstanding, location_code (raw only).
     Columns are always located by header name (scanned across a generous
-    column range, on whichever row actually carries the header), since the
-    curated format's exact column count/position has drifted between runs.
+    column range, on whichever row actually carries the header, and matched
+    against every known spelling of each field - see HEADER_SYNONYMS), since
+    the curated format's exact column count/position has drifted between
+    runs.
     """
     for name in wb.sheetnames:
         ws = wb[name]
         for r in range(1, 20):
             header = [ws.cell(r, c).value for c in range(1, 25)]
-            if not all(h in header for h in REQUIRED_HEADERS):
-                continue
+            normalized_header = [norm(h) for h in header]
             col_map = {
-                "item_desc": header.index("Item Description") + 1,
-                "delivery_date": header.index("Delivery Date") + 1,
-                "outstanding": header.index("Outstanding Quantity") + 1,
+                field: _find_header_col(normalized_header, synonyms)
+                for field, synonyms in HEADER_SYNONYMS.items()
             }
-            if "Location Code" in header:
-                col_map["location_code"] = header.index("Location Code") + 1
+            if any(c is None for c in col_map.values()):
+                continue
+            loc_col = _find_header_col(normalized_header, [LOCATION_CODE_HEADER])
+            if loc_col is not None:
+                col_map["location_code"] = loc_col
                 return ws, "raw", r, col_map
             return ws, "curated", r, col_map
     # fall back to the last sheet, assume curated layout at row 1, old

@@ -417,6 +417,18 @@ def write_laminates_sheet(wb, results, MONTHS, nav_map):
         cell.fill, cell.border, cell.alignment = t["fill"], t["border"], t["alignment"]
         cell.number_format, cell.font = t["number_format"], t["font"]
 
+    # The template's title (row 1) and month-block headers (row 2) are
+    # baked in from whenever the template was last authored (e.g.
+    # "Sep-26 to Feb-27") - they must be overwritten with the actual
+    # MONTHS window on every run, the same way the Week/Monthly Summary
+    # sheets rewrite their own titles and bucket labels, or the sheet
+    # keeps showing stale months regardless of the real report date.
+    ws.cell(1, 1).value = (
+        f"PM Requirements - Laminated Items (Monthly-->{_month_label(MONTHS[0])} to {_month_label(MONTHS[-1])})"
+    )
+    for i, m in enumerate(MONTHS):
+        ws.cell(2, 9 + 4 * i).value = _month_label(m)
+
     row_idx = TEMPLATE_ROW
     for itemk, v in sorted(results.items(), key=lambda kv: kv[1]["name"]):
         navcode = nav_map.get(v["name"].upper())

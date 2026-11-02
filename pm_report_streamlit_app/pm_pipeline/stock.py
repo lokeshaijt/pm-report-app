@@ -25,13 +25,24 @@ TARGET_LOCATIONS = {"WH-PM-MDKCBE", "WH-PM-MDKCBE2", "WH-PZ1-MDKCBE", "WH-PZ1-MD
 
 
 def _find_header_row(ws, max_scan=15):
+    """
+    Returns a list of (header_row, kind, match_score) candidates on this
+    sheet - every row within max_scan whose first cell looks like a known
+    layout, not just the first one found, so a sheet can be scored against
+    how completely it matches the real raw/pivot layout rather than merely
+    being the first sheet with a plausible-looking column A.
+    """
+    candidates = []
     for r in range(1, max_scan + 1):
         vals = [ws.cell(r, c).value for c in range(1, 8)]
         if vals[0] == "Location_Name":
-            return r, "raw"
-        if vals[0] in ("Row Labels", "Item_Name"):
-            return r, "pivot"
-    return None, None
+            score = sum(1 for h in ("Warehouse_Name", "Item_Name", "Qty Total") if h in vals)
+            candidates.append((r, "raw", score))
+        elif vals[0] in ("Row Labels", "Item_Name"):
+            full_header = [ws.cell(r, c).value for c in range(1, 12)]
+            score = sum(1 for h in TARGET_LOCATIONS if h in full_header)
+            candidates.append((r, "pivot", score))
+    return candidates
 
 
 def parse_stock(file_obj) -> dict:
@@ -39,25 +50,40 @@ def parse_stock(file_obj) -> dict:
 
     Only ONE representation of stock is used, even if the workbook contains
     several sheets that both describe the same underlying stock (e.g. a raw
-    dump sheet AND a pivot sheet). Using more than one and summing them
-    double-counts every item.
+    dump sheet AND a pivot sheet, or more than one candidate of the same
+    kind - a stray sheet elsewhere in the workbook can coincidentally start
+    with "Row Labels" too). Using more than one and summing them
+    double-counts every item, so every raw/pivot candidate across every
+    sheet is scored by how many of the real layout's own columns it also
+    carries (Warehouse_Name/Item_Name/Qty Total for raw, the 4 target
+    warehouse names for pivot), and only the single best-matching candidate
+    is used.
     Priority: any raw dump sheet found (most reliable, since it's filtered
-    to the 4 target warehouses explicitly) beats any pivot sheet.
+    to the 4 target warehouses explicitly) beats any pivot sheet, but among
+    several candidates of the same kind the best-scoring one wins rather
+    than whichever happens to come first.
     """
     wb = openpyxl.load_workbook(file_obj, data_only=True, read_only=True)
 
-    raw_sheet_info = None   # (sheet_name, header_row)
-    pivot_sheet_info = None  # (sheet_name, header_row) - first one found only
+    raw_candidates = []    # (score, sheet_name, header_row)
+    pivot_candidates = []  # (score, sheet_name, header_row)
 
     for sheet_name in wb.sheetnames:
         ws = wb[sheet_name]
-        header_row, kind = _find_header_row(ws)
-        if header_row is None:
-            continue
-        if kind == "raw" and raw_sheet_info is None:
-            raw_sheet_info = (sheet_name, header_row)
-        elif kind == "pivot" and pivot_sheet_info is None:
-            pivot_sheet_info = (sheet_name, header_row)
+        for header_row, kind, score in _find_header_row(ws):
+            if kind == "raw":
+                raw_candidates.append((score, sheet_name, header_row))
+            else:
+                pivot_candidates.append((score, sheet_name, header_row))
+
+    raw_sheet_info = None
+    if raw_candidates:
+        score, sheet_name, header_row = max(raw_candidates, key=lambda c: c[0])
+        raw_sheet_info = (sheet_name, header_row)
+    pivot_sheet_info = None
+    if pivot_candidates:
+        score, sheet_name, header_row = max(pivot_candidates, key=lambda c: c[0])
+        pivot_sheet_info = (sheet_name, header_row)
 
     stock = defaultdict(float)
 

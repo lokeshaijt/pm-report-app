@@ -174,6 +174,7 @@ def generate_report(export_file, domestic_file, pending_po_file, stock_file,
         "po_format": po_format,
         "po_excluded_other_location": po_excluded,
         "transaction_report_rows": transaction_report_rows,
+        "possible_error": possible_error,
     }
     prog(1.0, "Done.")
     return buf.getvalue(), stats

@@ -100,10 +100,17 @@ def consolidate_shortfall(results, buckets, issue_lead=5, arrive_lead=2):
         issue_by, arrive_by = {}, {}
         if buckets and isinstance(buckets[0], int):
             for b, qty in bucket_shortfalls.items():
-                issue_w = b - issue_lead
-                if issue_w >= buckets[0]:
-                    issue_by[issue_w] = qty
-                    arrive_by[issue_w + arrive_lead] = qty
+                # A shortfall whose natural issue-by week already fell before
+                # the report's first week (PO should've gone out last week
+                # or earlier) isn't dropped - it's still due now, so it's
+                # pulled forward into the current week instead of vanishing
+                # from the report. Several such overdue shortfalls can land
+                # on the same clamped week, so amounts are summed, not
+                # overwritten.
+                issue_w = max(b - issue_lead, buckets[0])
+                issue_by[issue_w] = issue_by.get(issue_w, 0.0) + qty
+                arrive_w = issue_w + arrive_lead
+                arrive_by[arrive_w] = arrive_by.get(arrive_w, 0.0) + qty
 
         consolidated.append({
             "name": v["name"], "item_type": v["item_type"], "category": v["category"],

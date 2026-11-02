@@ -38,6 +38,17 @@ HEADER_SYNONYMS = {
     "outstanding": ["Outstanding Quantity", "Outstanding Qty"],
 }
 LOCATION_CODE_HEADER = "Location Code"
+# Headers that aren't needed to parse a row, but are part of the known
+# Pending PO export layout - used only to score how closely a candidate
+# header row matches the real export, so that if a workbook has more than
+# one sheet carrying the 3 required headers (e.g. a stray summary/pivot
+# sheet that happens to repeat "Item Description"), the sheet that's
+# actually shaped like the real Pending PO export wins instead of
+# whichever one happens to appear first.
+OPTIONAL_SCORE_HEADERS = [
+    "Document No", "Order Date", "Customer Code", "Customer Name",
+    "Item No", "Quantity", "Unit Cost",
+]
 
 
 def _find_header_col(normalized_header, synonyms):
@@ -56,7 +67,16 @@ def _find_po_sheet_and_format(wb):
     against every known spelling of each field - see HEADER_SYNONYMS), since
     the curated format's exact column count/position has drifted between
     runs.
+
+    Every sheet/row that carries the 3 required headers is a candidate, not
+    just the first one found - each candidate is scored by how many of the
+    full known Pending PO header set it also carries (OPTIONAL_SCORE_HEADERS,
+    plus Location Code for the raw format), and the best-matching candidate
+    wins. This keeps an unrelated sheet that merely happens to repeat a
+    couple of the required column names from being picked over the sheet
+    that's actually shaped like the real export.
     """
+    candidates = []
     for name in wb.sheetnames:
         ws = wb[name]
         for r in range(1, 20):
@@ -69,10 +89,16 @@ def _find_po_sheet_and_format(wb):
             if any(c is None for c in col_map.values()):
                 continue
             loc_col = _find_header_col(normalized_header, [LOCATION_CODE_HEADER])
+            score = sum(1 for h in OPTIONAL_SCORE_HEADERS if norm(h) in normalized_header)
             if loc_col is not None:
                 col_map["location_code"] = loc_col
-                return ws, "raw", r, col_map
-            return ws, "curated", r, col_map
+                score += 1
+                candidates.append((score, ws, "raw", r, col_map))
+            else:
+                candidates.append((score, ws, "curated", r, col_map))
+    if candidates:
+        _, ws, fmt, r, col_map = max(candidates, key=lambda c: c[0])
+        return ws, fmt, r, col_map
     # fall back to the last sheet, assume curated layout at row 1, old
     # 10-column positions - better than refusing to parse at all
     ws = wb[wb.sheetnames[-1]]

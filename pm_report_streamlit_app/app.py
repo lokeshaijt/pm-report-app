@@ -216,6 +216,25 @@ if generate:
         **Shortfall sheet rows:** {stats['consolidated_shortfall_rows']:,}
         **Possible Error rows:** {stats['possible_error_rows']:,} ({stats['possible_error_distinct_fgs']:,} distinct FGs still missing from the BOM){po_note}{txn_note}
         """)
+
+        if stats["possible_error"]:
+            st.markdown('<span class="jay-section-label">Possible Error</span>', unsafe_allow_html=True)
+            st.caption("Order lines for an FG with no BOM entry at all - also included in the downloaded report's Possible Error sheet.")
+            st.dataframe(
+                [
+                    {
+                        "Nav Doc No": r["nav_doc_no"],
+                        "Buyer requested shipment date": r["ship_date"],
+                        "FG name": r["fg_name"],
+                        "Order Qty": r["order_qty"],
+                        "Issue": r["issue"],
+                    }
+                    for r in stats["possible_error"]
+                ],
+                use_container_width=True,
+                hide_index=True,
+            )
+
         filename = f"Packing_Materials_-_Weekly_Requirements_{report_date.strftime('%d%b%Y')}.xlsx"
         st.download_button(
             "⬇️ Download report",

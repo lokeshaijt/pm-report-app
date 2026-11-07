@@ -70,7 +70,7 @@ def run_cascade(pm_items, stock, total_pending, pending_delivery_by_item, planne
     return results
 
 
-def consolidate_shortfall(results, buckets, issue_lead=5, arrive_lead=2):
+def consolidate_shortfall(results, buckets, issue_lead=6, arrive_lead=2):
     """
     One row per item that has a shortfall somewhere in the window.
 
@@ -114,6 +114,7 @@ def consolidate_shortfall(results, buckets, issue_lead=5, arrive_lead=2):
 
         consolidated.append({
             "name": v["name"], "item_type": v["item_type"], "category": v["category"],
+            "current_stock": v["current_stock"],
             "total_shortfall": total_shortfall, "suggested_moq": moq,
             "bucket_shortfalls": bucket_shortfalls,
             "issue_by": issue_by, "arrive_by": arrive_by,

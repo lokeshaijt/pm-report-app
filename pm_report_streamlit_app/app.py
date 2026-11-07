@@ -109,9 +109,9 @@ with st.expander("What this does", expanded=False):
       the 6-month **Laminates** sheet (currently 40 fixed items).
     - Runs the requirement cascade with the *no-floor* rule: a shortfall carries
       forward and compounds until something arrives to offset it.
-    - **Shortfall** sheet: one row per item, incremental per-week shortfall
-      amounts (not raw running balance), Suggested MOQ, PO Issue-by/Arrive-by
-      columns (-5 weeks / +2 weeks).
+    - **Shortfall** sheet: one row per item, Current Stock, incremental
+      per-week shortfall amounts (not raw running balance), Suggested MOQ,
+      PO Issue-by/Arrive-by columns (-6 weeks / +2 weeks).
     - **Possible Error** sheet: every order line for an FG with no BOM entry at
       all (excluding FG-/STD-prefixed internal placeholders), with the order's
       own Nav Doc No for traceability.

@@ -297,20 +297,20 @@ def write_shortfall_sheet(wb, consolidated, WEEKS, WEEK_BOUNDS, nav_map):
     qty_style = _style_ref(ws, 3, 5)[5]
     dash_style = _style_ref(ws, 3, 6)[6]
 
+    NW = len(WEEKS)
+    SF_START = 8
+    ISSUE_START = SF_START + NW
+    ARRIVE_START = ISSUE_START + NW
+    NEW_MAX_COL = ARRIVE_START + NW - 1
+
     for rng in list(ws.merged_cells.ranges):
         ws.unmerge_cells(str(rng))
     for r in range(1, OLD_MAX_ROW + 1):
-        for c in range(1, OLD_MAX_COL + 3):
+        for c in range(1, max(OLD_MAX_COL, NEW_MAX_COL) + 3):
             cell = ws.cell(r, c)
             cell.value = None
             cell.fill = openpyxl.styles.PatternFill(fill_type=None)
             cell.font, cell.border = openpyxl.styles.Font(), openpyxl.styles.Border()
-
-    NW = len(WEEKS)
-    SF_START = 7
-    ISSUE_START = SF_START + NW
-    ARRIVE_START = ISSUE_START + NW
-    NEW_MAX_COL = ARRIVE_START + NW - 1
 
     # Each block gets its own solid color (theme-based, "Darker 25%" tint) so
     # the three week-blocks are distinguishable at a glance, matching the
@@ -325,7 +325,7 @@ def write_shortfall_sheet(wb, consolidated, WEEKS, WEEK_BOUNDS, nav_map):
     title_font = openpyxl.styles.Font(bold=True, color="FFFFFFFF")
     center = openpyxl.styles.Alignment(horizontal="center", vertical="center")
 
-    ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=6)
+    ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=7)
     ws.cell(1, 1).value = (f"PM Shortfall & PO Plan (weekly-bucketed Pending Delivery) - "
                             f"{fmt(WEEK_BOUNDS[WEEKS[0]][0])} to {fmt(WEEK_BOUNDS[WEEKS[-1]][1])}")
 
@@ -340,7 +340,7 @@ def write_shortfall_sheet(wb, consolidated, WEEKS, WEEK_BOUNDS, nav_map):
     block_title("PO to Arrive", ARRIVE_START, ARRIVE_START + NW - 1, "arrive")
 
     for i, h in enumerate(["Nav Item Code", "Item Name", "Item Type", "Item Category",
-                            "Shortfall Quantity", "Suggested MOQ"], start=1):
+                            "Current Stock", "Shortfall Quantity", "Suggested MOQ"], start=1):
         c = ws.cell(2, i); c.value = h; c.fill, c.font, c.alignment = head_fill, head_font, center
     for i, w in enumerate(WEEKS):
         for base, theme_key in ((SF_START, "sf"), (ISSUE_START, "issue"), (ARRIVE_START, "arrive")):
@@ -367,9 +367,10 @@ def write_shortfall_sheet(wb, consolidated, WEEKS, WEEK_BOUNDS, nav_map):
         c1 = ws.cell(row_idx, 2); c1.value = r["name"]; apply(c1, name_style)
         c2 = ws.cell(row_idx, 3); c2.value = r["item_type"]; apply(c2, type_style)
         c3 = ws.cell(row_idx, 4); c3.value = r["category"]; apply(c3, type_style)
-        c4 = ws.cell(row_idx, 5); c4.value = round(r["total_shortfall"], 4); apply(c4, qty_style)
-        c5 = ws.cell(row_idx, 6); c5.value = r["suggested_moq"] if r["suggested_moq"] is not None else 0
-        apply(c5, dash_style)
+        c4 = ws.cell(row_idx, 5); c4.value = round(r["current_stock"], 4); apply(c4, qty_style)
+        c5 = ws.cell(row_idx, 6); c5.value = round(r["total_shortfall"], 4); apply(c5, qty_style)
+        c6 = ws.cell(row_idx, 7); c6.value = r["suggested_moq"] if r["suggested_moq"] is not None else 0
+        apply(c6, dash_style)
 
         for w in WEEKS:
             cell = ws.cell(row_idx, SF_COLS[w])

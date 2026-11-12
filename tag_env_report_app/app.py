@@ -1,6 +1,13 @@
 import copy
 import io
 import json
+import sys
+
+# Streamlit Cloud re-runs app.py after a git update but keeps already-imported
+# modules in memory. Drop our own package so every run uses the deployed code
+# (otherwise a new app.py can meet an old tag_env and fail).
+for _name in [m for m in sys.modules if m == "tag_env" or m.startswith("tag_env.")]:
+    del sys.modules[_name]
 
 import pandas as pd
 import streamlit as st

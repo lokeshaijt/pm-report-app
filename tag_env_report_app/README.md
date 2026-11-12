@@ -64,8 +64,9 @@ for each item. Nothing is hardcoded.
   * If none of its FGs has a pending order, the most common pack size among its
     single-flavour FGs is used (ties → the smaller pack).
 * **Missing data**: if the item is not in the Exploded BOM, or its BOM qty is below
-  1 PCS per case (a BOM data error), the Make Cases cell is **left blank**. The item is then
-  listed on the *Exceptions* tab. Items whose machine line has no report column are listed
+  1 PCS per case (a BOM data error), the divisor that the reference report used for that
+  row and column is used instead. If there is none (a new row), the Make Cases cell is
+  **left blank**. Either way the item is listed on the *Exceptions* tab. Items whose machine line has no report column are listed
   there too.
 
 `Max Can Make` and the `AL` column keep the reference formulas (`MAX(C,E)`, `=S`,
@@ -74,15 +75,21 @@ for each item. Nothing is hardcoded.
 
 ### Rows
 
-One row per brand/variant. The row key is the item name without `ENV`/`TAG`, cut at the
-first machine token (`DC`, `C250`, `PK45`, `PTAG`, `PENV`). Any qualifier after `TBGS` is
-kept, e.g. `(MATADI)`, `-FT` or `(v2)`. Paper-weight qualifiers such as `(70 GSM)` are
-ignored.
+The row list, labels and order come from the reference report (column A of
+`templates/Tag_Env_Stock_Template.xlsx`, or of the template uploaded in the app). Rows
+with no stock stay in place with zeros, as in the manual report.
 
-The ENV and TAG items of the same variant share a row. A shared tag (for example
-`TAG BARISSIMO DC PTAG TBGS`) gets its own `TAG …` row, so every stock KG appears exactly
-once. ENV rows are listed alphabetically, followed by the TAG-only rows, and a SUM total
-row closes the sheet.
+* **Matching items to rows.** Each stock item is matched by its row key: the name
+  without `ENV`/`TAG`, cut at the first machine token (`DC`, `C250`, `PK45`, `PTAG`,
+  `PENV`), keeping any qualifier after `TBGS` such as `(MATADI)` or `-FT`, and ignoring
+  `(70 GSM)` / `(WO GLUE)`. So `ENV CHAYA DC SF C250 TBGS`, `TAG CHAYA DC SF TBGS` and
+  `ENV CHAYA DC PENV TBGS (WO GLUE)` all land in the reference row `ENV CHAYA DC PENV TBGS`.
+* **Brand-level tags** such as `TAG BARISSIMO`, `TAG GV FLAVOUR` or `TAG ICA COMMON` go
+  into the first row of that brand. Their KG and Can Make cells are merged across the
+  brand's rows, as in the manual report. `shared_tag_rows` in `config/settings.json`
+  pins the Jumbo tags to their row ranges.
+* **New items** with no row in the reference are inserted in alphabetical position. The
+  Format validation tab reports how many.
 
 ### Ghana & AB & AG Stock
 
@@ -130,8 +137,5 @@ button saves them.
   now uses its own factor.
 * The HS envelope factor follows the conversion table (Paper 1425 by default; Foil 1190 can
   be picked in the sidebar). The manual sheet used 1200.
-* Data-area merged cells (manual groupings such as one Barissimo tag spread over nine
-  rows) are not recreated. Shared tags get their own row instead, so totals are not counted
-  twice.
 * External links to the ERP workbook (`[1]Stock Summary…`) are replaced by values, so the
   file opens without an *update links* prompt. Excel recalculates all formulas on open.

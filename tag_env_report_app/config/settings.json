@@ -52,7 +52,7 @@
   "_bom_readme": "Exploded BOM: the denominator of Make Cases is the 'Qty' (PCS) of the ENV/TAG item per case of the FG. Only FGs whose 'FG Uom' is in case_uoms are used; a qty below min_pcs_per_case is treated as a BOM data error and ignored.",
   "bom": {"case_uoms": ["CFC"], "component_uom": "PCS", "min_pcs_per_case": 1},
 
-  "remarks": {"with_order": "Order Received", "no_order": "No Order", "no_bom": "BOM not found"},
+  "remarks": {"with_order": "Order Received", "no_order": "No Order", "no_bom": "BOM not found", "no_stock": ""},
 
   "_regions_readme": "Items whose name contains one of these markers go to the 'Ghana & AB & AG Stock' sheet instead of the main sheet. 'extra_items' are exact item names that the reference report also lists in that section.",
   "regions": [
@@ -65,6 +65,15 @@
   "grouping": {
     "machine_tokens": ["DC", "C250", "PK45", "PTAG", "PENV"],
     "ignore_qualifiers": ["\\(\\s*\\d+\\s*GSM\\s*\\)", "\\(\\s*WO\\s*GLUE\\s*\\)"],
-    "item_prefixes": ["ENV", "TAG"]
+    "item_prefixes": ["ENV", "TAG"],
+    "_shared_readme": "Row list and order come from the reference report (templates/Tag_Env_Stock_Template.xlsx, column A). A brand-level tag with no row of its own (e.g. TAG BARISSIMO, TAG GV FLAVOUR, TAG ICA COMMON) is placed in the first row of that brand and merged across the brand's rows, as in the manual report. shared_tag_words are dropped to find the brand (ICA COMMON -> ICA). shared_tag_rows pins a tag to a range of reference rows: tag row key -> [first row key, last row key] (row key = name without ENV/TAG and machine tokens).",
+    "shared_tag_words": ["COMMON", "FLAVOUR"],
+    "shared_tag_rows": {
+      "JUMBO FRUIT TEA": ["JUMBO BLACKCURRENT", "JUMBO TROPICAL FRUIT"],
+      "JUMBO FRUIT TEA TAG": ["JUMBO BLACKCURRENT", "JUMBO ROOIBOS ORIGINAL"],
+      "JUMBO BLACK TEA": ["JUMBO EARL GREY", "JUMBO ENGELESE MELANGE"],
+      "JUMBO GREEN TEA": ["JUMBO GREEN LEMON", "JUMBO GREEN TEA PURE ORIGINAL"],
+      "GARANT ENGLISH BREAKFAST FT": ["GARANT ENGLISH BREAKFAST"]
+    }
   }
 }

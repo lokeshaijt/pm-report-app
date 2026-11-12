@@ -7,6 +7,7 @@ import streamlit as st
 
 from tag_env.config import CONFIG_PATH, TEMPLATE_PATH, load_config
 from tag_env.engine import build_report
+from tag_env.template import read_master_rows
 from tag_env.pipeline import preview_frame
 from tag_env.readers import read_exploded_bom, read_order_status, read_stock_summary
 from tag_env.validate import validate_report
@@ -101,7 +102,7 @@ if st.button("Generate report", type="primary", disabled=not ready, width="stret
             bom = _bom(up_bom.getvalue())
         with st.spinner("Calculating and writing the report..."):
             template = io.BytesIO(up_tpl.getvalue()) if up_tpl else TEMPLATE_PATH
-            result = build_report(stock, orders, bom, cfg)
+            result = build_report(stock, orders, bom, cfg, master=read_master_rows(template, cfg))
             xlsx = write_report(result, cfg, template)
             if up_tpl:
                 template.seek(0)

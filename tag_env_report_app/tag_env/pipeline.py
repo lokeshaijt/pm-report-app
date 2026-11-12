@@ -7,6 +7,7 @@ import pandas as pd
 
 from .config import TEMPLATE_PATH, load_config
 from .engine import ReportResult, build_report, row_values
+from .template import read_master_rows
 from .readers import read_exploded_bom, read_order_status, read_stock_summary
 from .validate import validate_report
 from .writer import write_report
@@ -47,7 +48,7 @@ def run(stock_bytes: bytes, order_bytes: bytes, bom_bytes: bytes, cfg: dict | No
     stock = read_stock_summary(stock_bytes)
     orders = read_order_status(order_bytes)
     bom = read_exploded_bom(bom_bytes)
-    result = build_report(stock, orders, bom, cfg)
+    result = build_report(stock, orders, bom, cfg, master=read_master_rows(template_path, cfg))
     xlsx = write_report(result, cfg, template_path)
     validation = validate_report(xlsx, template_path, result, cfg)
     return PipelineOutput(xlsx=xlsx, result=result, preview=preview_frame(result, cfg),

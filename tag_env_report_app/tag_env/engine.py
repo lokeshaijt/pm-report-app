@@ -23,6 +23,7 @@ from dataclasses import dataclass, field
 import pandas as pd
 
 from .readers import StockData, norm
+from .template import MasterRow
 
 
 # --------------------------------------------------------------------------- #
@@ -49,6 +50,7 @@ class Cell:
     kg: float = 0.0
     items: list[ItemCalc] = field(default_factory=list)
     denominator: float | None = None
+    den_source: str = ""        # "Exploded BOM" / "Reference report" / ""
 
 
 @dataclass
@@ -58,6 +60,9 @@ class ReportRow:
     cells: dict[str, Cell] = field(default_factory=dict)   # by kg column
     remark: str = ""
     row_denominator: float | None = None                   # fallback for empty cells
+    in_template: bool = False                              # row exists in the reference report
+    template_dens: dict[str, float] = field(default_factory=dict)  # kg_col -> reference divisor
+    merge_spans: dict[str, int] = field(default_factory=dict)      # kg_col -> rows a shared tag spans
 
 
 @dataclass
@@ -197,16 +202,70 @@ class BomLookup:
 # --------------------------------------------------------------------------- #
 # Main build
 # --------------------------------------------------------------------------- #
-def build_report(stock: StockData, orders: pd.DataFrame, bom: pd.DataFrame, cfg: dict) -> ReportResult:
+def _shared_base(key: str, cfg: dict) -> str:
+    """'GV FLAVOUR' -> 'GV', 'ICA COMMON' -> 'ICA', 'BOM DIA (MATADI)' -> 'BOM DIA'."""
+    words = cfg["grouping"].get("shared_tag_words", [])
+    base = re.sub(r"\([^)]*\)", " ", key)
+    for w in words:
+        m = re.search(rf"\b{re.escape(w.upper())}\b", base)
+        if m:
+            base = base[: m.start()]
+    return re.sub(r"\s+", " ", base).strip(" -")
+
+
+def build_report(stock: StockData, orders: pd.DataFrame, bom: pd.DataFrame, cfg: dict,
+                 master: list[MasterRow] | None = None) -> ReportResult:
     factors = {k: float(v) for k, v in cfg["conversion_factors"].items()}
     lookup = BomLookup(bom, orders, cfg)
     prefixes = {p.upper() for p in cfg["grouping"]["item_prefixes"]}
+    overrides = {norm(k): [norm(x) for x in v] for k, v in cfg["grouping"].get("shared_tag_rows", {}).items()}
 
     regions_cfg = cfg.get("regions", [])
     region_rows = {r["title"]: [] for r in regions_cfg}
 
-    rows: dict[str, ReportRow] = {}
-    row_has_env: dict[str, bool] = {}
+    # ---- master rows from the reference report (kept in their order) ----- #
+    master_rows: list[ReportRow] = []
+    by_key: dict[str, ReportRow] = {}
+    for m in master or []:
+        _, key = row_key(m.label, cfg)
+        if key in by_key:
+            continue
+        row = ReportRow(key=key, label=m.label, in_template=True, template_dens=dict(m.dens))
+        master_rows.append(row)
+        by_key[key] = row
+    master_index = {r.key: i for i, r in enumerate(master_rows)}
+    new_rows: dict[str, ReportRow] = {}
+    new_has_env: dict[str, bool] = {}
+
+    def targets(prefix: str, key: str) -> list[ReportRow]:
+        if key in by_key:
+            return [by_key[key]]
+        if key in new_rows:
+            return [new_rows[key]]
+        if prefix == "TAG" and master_rows:
+            # explicitly configured shared tag -> range of reference rows
+            if key in overrides:
+                ks = [k for k in overrides[key] if k in master_index]
+                if ks:
+                    i0, i1 = master_index[ks[0]], master_index[ks[-1]]
+                    return master_rows[min(i0, i1): max(i0, i1) + 1]
+            # brand-level tag (e.g. TAG BARISSIMO, TAG GV FLAVOUR, TAG ICA COMMON):
+            # the contiguous reference rows of that brand, as in the manual report
+            base = _shared_base(key, cfg)
+            if base:
+                group = []
+                for r in master_rows:
+                    if r.key == base or r.key.startswith(base + " "):
+                        group.append(r)
+                    elif group:
+                        break
+                if group:
+                    return group
+        row = ReportRow(key=key, label="")
+        new_rows[key] = row
+        new_has_env[key] = False
+        return [row]
+
     details, exceptions = [], []
     kg_main = kg_regions = 0.0
 
@@ -236,11 +295,13 @@ def build_report(stock: StockData, orders: pd.DataFrame, bom: pd.DataFrame, cfg:
 
         kg_main += kg
         _, key = row_key(item, cfg)
-        if key not in rows:
-            rows[key] = ReportRow(key=key, label="")
-            row_has_env[key] = False
-        row = rows[key]
-        row_has_env[key] |= prefix == "ENV"
+        group = targets(prefix, key)
+        row = group[0]
+        if row.key in new_has_env:
+            new_has_env[row.key] |= prefix == "ENV"
+        if len(group) > 1:
+            row.merge_spans[inp["kg_col"]] = max(row.merge_spans.get(inp["kg_col"], 1), len(group))
+            row._groups = {**getattr(row, "_groups", {}), inp["kg_col"]: group}  # type: ignore[attr-defined]
 
         fkey = inp["factor_key"]
         calc = ItemCalc(item=item, machine_line=ml, kg=kg, kg_col=inp["kg_col"], cases_col=inp["cases_col"],
@@ -257,35 +318,76 @@ def build_report(stock: StockData, orders: pd.DataFrame, bom: pd.DataFrame, cfg:
             exceptions.append({"Item": item, "Machine Line": ml, "KG": kg,
                                "Issue": f"Conversion factor '{fkey}' missing in config"})
         if not calc.bom_found and kg:
-            issue = ("Exploded BOM qty per case is below 1 PCS (BOM data error) - Make Cases left blank"
-                     if rec.item_norm in lookup.invalid_items else
-                     "Item not found in Exploded BOM (as a CFC component) - Make Cases left blank")
-            exceptions.append({"Item": item, "Machine Line": ml, "KG": kg, "Issue": issue})
+            why = ("Exploded BOM qty per case is below 1 PCS (BOM data error)"
+                   if rec.item_norm in lookup.invalid_items else
+                   "Item not found in Exploded BOM (as a CFC component)")
+            fallback = row.template_dens.get(inp["kg_col"])
+            action = (f"divisor {fallback:g} taken from the reference report row '{row.label.strip()}'"
+                      if fallback else "Make Cases left blank")
+            exceptions.append({"Item": item, "Machine Line": ml, "KG": kg, "Issue": f"{why} - {action}"})
 
-    # ---- finalise rows -------------------------------------------------- #
-    for key, row in rows.items():
-        row.label = f"{'ENV' if row_has_env[key] else 'TAG'} {key} "
-        any_order = False
-        any_bom = False
+    # ---- labels for new rows -------------------------------------------- #
+    for key, row in new_rows.items():
+        row.label = f"{'ENV' if new_has_env[key] else 'TAG'} {key} "
+
+    # ---- order: reference rows as-is; new rows slotted in alphabetically -- #
+    ordered_rows = list(master_rows)
+    for row in sorted(new_rows.values(), key=lambda r: norm(r.label)):
+        pref = norm(row.label).split(" ", 1)[0]
+        same = [i for i, r in enumerate(ordered_rows) if norm(r.label).split(" ", 1)[0] == pref]
+        pos = None
+        for i in same:
+            if norm(ordered_rows[i].label) > norm(row.label):
+                pos = i
+                break
+        if pos is None:
+            pos = (same[-1] + 1) if same else (len(ordered_rows) if pref == "TAG" else
+                                                next((i for i, r in enumerate(ordered_rows)
+                                                      if norm(r.label).startswith("TAG")), len(ordered_rows)))
+        ordered_rows.insert(pos, row)
+
+    # ---- merges: only keep a span if the rows below have nothing of their own
+    pos_of = {id(r): i for i, r in enumerate(ordered_rows)}
+    for row in ordered_rows:
+        for col in list(row.merge_spans):
+            group = getattr(row, "_groups", {}).get(col)
+            if not group:
+                del row.merge_spans[col]
+                continue
+            # span from the brand's first to last reference row; new rows that
+            # were slotted in between are covered too
+            i0, i1 = pos_of[id(group[0])], pos_of[id(group[-1])]
+            span = ordered_rows[i0: i1 + 1]
+            if i0 != pos_of[id(row)] or any(col in r.cells and r.cells[col].items for r in span[1:]):
+                del row.merge_spans[col]
+            else:
+                row.merge_spans[col] = len(span)
+
+    # ---- divisors and remarks ------------------------------------------- #
+    rc = cfg["remarks"]
+    for row in ordered_rows:
+        any_order = any_bom = any_item = False
         rep = None
-        for cell in row.cells.values():
+        for col, cell in row.cells.items():
+            if not cell.items:
+                continue
+            any_item = True
             with_bom = [c for c in cell.items if c.bom_found]
             if with_bom:
-                # Denominator for the cell: the item with a pending order (largest
-                # pending), otherwise the item with the most KG.
+                # the item with a pending order (largest pending), else the most KG
                 best = sorted(with_bom, key=lambda c: (c.has_order, c.pending_qty, c.kg), reverse=True)[0]
-                cell.denominator = best.bom_qty
+                cell.denominator, cell.den_source = best.bom_qty, "Exploded BOM"
                 any_bom = True
                 any_order |= any(c.has_order for c in with_bom)
                 if rep is None or (best.has_order and not rep[1]):
                     rep = (best.bom_qty, best.has_order)
+            elif row.template_dens.get(col):
+                cell.denominator, cell.den_source = row.template_dens[col], "Reference report"
         row.row_denominator = rep[0] if rep else None
-        rc = cfg["remarks"]
-        row.remark = rc["with_order"] if any_order else (rc["no_order"] if any_bom else rc["no_bom"])
-
-    env_rows = sorted([r for r in rows.values() if r.label.startswith("ENV")], key=lambda r: r.key)
-    tag_rows = sorted([r for r in rows.values() if r.label.startswith("TAG")], key=lambda r: r.key)
-    ordered_rows = env_rows + tag_rows
+        if not any_item:
+            row.remark = rc.get("no_stock", "")
+        else:
+            row.remark = rc["with_order"] if any_order else (rc["no_order"] if any_bom else rc["no_bom"])
 
     for r in ordered_rows:
         for cell in r.cells.values():
@@ -295,8 +397,9 @@ def build_report(stock: StockData, orders: pd.DataFrame, bom: pd.DataFrame, cfg:
                     "Report Row": r.label.strip(), "Column": c.kg_col, "Item": c.item,
                     "Machine Line": c.machine_line, "KG": c.kg, "Conversion Factor": c.factor,
                     "Factor Source": c.factor_key, "FG Used": c.fg_name, "BOM Qty / Case": c.bom_qty,
-                    "Cell Denominator": cell.denominator, "Pending Order Qty": c.pending_qty,
-                    "Make Cases": cases,
+                    "Cell Denominator": cell.denominator, "Divisor Source": cell.den_source,
+                    "Pending Order Qty": c.pending_qty, "Make Cases": cases,
+                    "Row in reference report": "Yes" if r.in_template else "New row",
                 })
 
     regions = []
@@ -315,16 +418,17 @@ def build_report(stock: StockData, orders: pd.DataFrame, bom: pd.DataFrame, cfg:
 
 
 def cell_denominator(row: ReportRow, kg_col: str) -> float | None:
-    """BOM denominator for a Make-Cases cell.
+    """Divisor for a Make-Cases cell.
 
-    A cell fed by stock items uses its own BOM qty (None if the item is not in
-    the BOM, so no wrong number is produced). An empty cell (0 KG) reuses the
-    row's denominator so the formula stays in place for manual edits.
+    A cell fed by stock items uses the Exploded-BOM qty (or, if the item is not
+    in the BOM, the divisor the reference report used for that row; None if
+    neither exists, so no wrong number is produced). An empty cell (0 KG) keeps
+    the reference report's divisor, else the row's BOM divisor.
     """
     cell = row.cells.get(kg_col)
     if cell is not None and cell.items:
         return cell.denominator
-    return row.row_denominator
+    return row.template_dens.get(kg_col) or row.row_denominator
 
 
 def row_values(row: ReportRow, cfg: dict) -> dict[str, float | None]:

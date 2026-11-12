@@ -80,10 +80,19 @@ def validate_report(xlsx: bytes, template_path, result: ReportResult, cfg: dict)
     t_total = next(r for r in range(t.max_row, 4, -1) if str(t.cell(r, 2).value or "").upper().startswith("=SUM("))
     allowed = {c: {_sk(t.cell(r, c)) for r in range(5, t_total) if not isinstance(t.cell(r, c), MergedCell)}
                for c in range(1, 40)}
+    merged = set()
+    for m in o.merged_cells.ranges:
+        if m.min_row >= first:
+            merged |= {(r, c) for r in range(m.min_row, m.max_row + 1) for c in range(m.min_col, m.max_col + 1)}
     bad = [o.cell(r, c).coordinate for r in range(first, last + 1) for c in range(1, 40)
-           if _sk(o.cell(r, c)) not in allowed[c]]
+           if (r, c) not in merged and _sk(o.cell(r, c)) not in allowed[c]]
     add("Data-row formatting copied from template rows", not bad,
         f"{n} rows checked" if not bad else f"{len(bad)} cells differ, e.g. {', '.join(bad[:8])}")
+    n_m = sum(1 for m in o.merged_cells.ranges if m.min_row >= first)
+    add("Shared-tag cells merged across brand rows (as in the reference)", None, f"{n_m} merged ranges")
+    rows_new = sum(1 for r in result.rows if not r.in_template)
+    add("Rows kept from the reference report / new rows added", None,
+        f"{len(result.rows) - rows_new} reference rows kept in order, {rows_new} new rows inserted")
     bad = [o.cell(last + 1, c).coordinate for c in range(1, 40) if _sk(o.cell(last + 1, c)) != _sk(t.cell(t_total, c))]
     add("Total-row formatting", not bad, f"row {last + 1}" if not bad else ", ".join(bad))
 

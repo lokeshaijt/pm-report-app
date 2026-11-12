@@ -134,6 +134,18 @@ def _fill_main(ws, result: ReportResult, cfg: dict):
         ws[f"{cfg['remarks_col']}{r}"].value = row.remark
         r += 1
 
+    # --- shared tags: merge KG + cases cells across the brand's rows -------- #
+    inp_by_kg = {i["kg_col"]: i for b in cfg["blocks"] for i in b["inputs"]}
+    for i, row in enumerate(result.rows):
+        for kg_col, n in row.merge_spans.items():
+            if n < 2:
+                continue
+            top = FIRST_DATA_ROW + i
+            for col in (kg_col, inp_by_kg[kg_col]["cases_col"]):
+                c = ws[f"{col}{top}"]
+                c.alignment = c.alignment.copy(horizontal="center", vertical="center")
+                ws.merge_cells(f"{col}{top}:{col}{top + n - 1}")
+
     # --- total row ---------------------------------------------------------- #
     last = r - 1
     for c in range(1, LAST_COL + 1):

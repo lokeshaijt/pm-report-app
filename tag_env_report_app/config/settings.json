@@ -13,10 +13,22 @@
     "Constanta Tag Big": 6040,
     "MD-20 Tag": 12600,
     "Maisa Tag": 9080,
-    "PERFACTA TAG & PK-45 & Constanta Tag": 10780
+    "PERFACTA TAG & PK-45 & Constanta Tag": 10780,
+    "MD HS Envelope (as in report)": 1200
   },
 
-  "_blocks_readme": "One entry per brand block on the 'Env & Tag Stock' sheet. kg_col = KG column, cases_col = Can-Make-Cases column, the factor is written in row 4 of cases_col, factor_key = key into conversion_factors, machine_lines = Stock Summary 'Machine Line Name' values that feed this column. hs_only=true means only items whose name contains the token 'HS'; hs_excluded=true means items with 'HS' are skipped here (they go to the HS block).",
+  "_factor_mode_readme": "reference = formulas and row-4 values exactly as in the approved report (its MD20 HS / MAISA / Perfecta Tag formulas read $I$4, $K$4 and $S$4, and Y4 shows 1200). own_block = every block's Make Cases formula reads its own row-4 cell, filled with that input's factor_key.",
+  "factor_mode": "reference",
+  "row4_factors": {
+    "C4": "PERFACTA TAG & PK-45 & Constanta Tag", "E4": "CONSTANTA-250",
+    "I4": "MD-20 Tag", "K4": "MD-20 Crimp Envelope",
+    "O4": "Constanta Envelope", "S4": "Perfecta Envelope (PENV)",
+    "W4": "MD-20 Tag", "Y4": "MD HS Envelope (as in report)",
+    "AC4": "Maisa Tag", "AE4": "Maisa Envelope",
+    "AI4": "PERFACTA TAG & PK-45 & Constanta Tag"
+  },
+
+  "_blocks_readme": "One entry per brand block on the 'Env & Tag Stock' sheet. kg_col = KG column, cases_col = Can-Make-Cases column, factor_key = the input's own factor (used in own_block mode), factor_cell = the row-4 cell its formula reads in reference mode (default: row 4 of cases_col), machine_lines = Stock Summary 'Machine Line Name' values that feed this column. hs_only=true means only items whose name contains the token 'HS'; hs_excluded=true means items with 'HS' are skipped here (they go to the HS block).",
   "blocks": [
     {"name": "C250", "max_col": "F", "max_formula": "MAX({C},{E})", "inputs": [
       {"kind": "TAG", "kg_col": "B", "cases_col": "C", "factor_key": "PERFACTA TAG & PK-45 & Constanta Tag", "machine_lines": ["Constanta Tag"]},
@@ -33,15 +45,15 @@
       {"kind": "ENV", "kg_col": "R", "cases_col": "S", "factor_key": "Perfecta Envelope (PENV)", "machine_lines": ["Perfecta Envelope (PENV)"]}
     ]},
     {"name": "MD20 HS", "max_col": "Z", "max_formula": "MAX({W},{Y})", "inputs": [
-      {"kind": "TAG", "kg_col": "V", "cases_col": "W", "factor_key": "MD-20 Tag", "machine_lines": ["MD-20 Tag"], "hs_only": true},
-      {"kind": "ENV", "kg_col": "X", "cases_col": "Y", "factor_key": "MD HS Envelope Paper", "machine_lines": ["MD HS Envelope", "MD HS Envelope Paper", "MD HS Envelope Foil"]}
+      {"kind": "TAG", "kg_col": "V", "cases_col": "W", "factor_cell": "I4", "factor_key": "MD-20 Tag", "machine_lines": ["MD-20 Tag"], "hs_only": true},
+      {"kind": "ENV", "kg_col": "X", "cases_col": "Y", "factor_cell": "K4", "factor_key": "MD HS Envelope Paper", "machine_lines": ["MD HS Envelope", "MD HS Envelope Paper", "MD HS Envelope Foil"]}
     ]},
     {"name": "MAISA", "max_col": "AF", "max_formula": "MAX({AC},{AE})", "inputs": [
-      {"kind": "TAG", "kg_col": "AB", "cases_col": "AC", "factor_key": "Maisa Tag", "machine_lines": ["Maisa Tag"]},
-      {"kind": "ENV", "kg_col": "AD", "cases_col": "AE", "factor_key": "Maisa Envelope", "machine_lines": ["Maisa Envelope"]}
+      {"kind": "TAG", "kg_col": "AB", "cases_col": "AC", "factor_cell": "I4", "factor_key": "Maisa Tag", "machine_lines": ["Maisa Tag"]},
+      {"kind": "ENV", "kg_col": "AD", "cases_col": "AE", "factor_cell": "K4", "factor_key": "Maisa Envelope", "machine_lines": ["Maisa Envelope"]}
     ]},
     {"name": "Perfecta Tag / PK45", "max_col": "AJ", "max_formula": "{AI}", "inputs": [
-      {"kind": "TAG", "kg_col": "AH", "cases_col": "AI", "factor_key": "PERFACTA TAG & PK-45 & Constanta Tag", "machine_lines": ["PK-45", "PERFACTA TAG"]}
+      {"kind": "TAG", "kg_col": "AH", "cases_col": "AI", "factor_cell": "S4", "factor_key": "PERFACTA TAG & PK-45 & Constanta Tag", "machine_lines": ["PK-45", "PERFACTA TAG"]}
     ]}
   ],
 

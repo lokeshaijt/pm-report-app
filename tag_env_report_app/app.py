@@ -30,7 +30,7 @@ st.markdown(
       <h1>Tag &amp; Env Stock Report</h1>
       <p>Upload the Stock Summary, Order Status and Exploded BOM reports. The app calculates
       Make Cases = (Available KG &times; Conversion Factor) / Exploded-BOM qty per case and fills the
-      approved Tag &amp; Env Stock workbook, so it is ready to download in the same format.</p>
+      approved Tag &amp; Env Stock workbook automatically, in exactly the same rows, order and format.</p>
     </div>
     """,
     unsafe_allow_html=True,
@@ -55,30 +55,40 @@ def _bom(data: bytes):
     return read_exploded_bom(data)
 
 
+@st.cache_data(show_spinner=False, max_entries=5)
+def _generate(stock_b: bytes, orders_b: bytes, bom_b: bytes, tpl_b: bytes | None, cfg_json: str):
+    cfg = json.loads(cfg_json)
+    stock, orders, bom = _stock(stock_b), _orders(orders_b), _bom(bom_b)
+    tpl = (lambda: io.BytesIO(tpl_b)) if tpl_b else (lambda: TEMPLATE_PATH)
+    result = build_report(stock, orders, bom, cfg, master=read_master_rows(tpl(), cfg))
+    xlsx = write_report(result, cfg, tpl())
+    validation = validate_report(xlsx, tpl(), result, cfg)
+    return dict(result=result, xlsx=xlsx, validation=validation, cfg=cfg)
+
+
 base_cfg = load_config()
 
 # --------------------------------------------------------------------------- #
-# Sidebar: conversion factors (editable for this run)
+# Sidebar: settings (defaults reproduce the approved report; nothing to change)
 # --------------------------------------------------------------------------- #
 with st.sidebar:
-    st.header("Conversion factors")
-    st.caption("Pieces per KG by Machine Line. Defaults come from `config/settings.json`; "
-               "changes here apply to this run only.")
+    st.header("Settings")
+    st.caption("Defaults reproduce the approved report exactly - no changes are needed. "
+               "Changes here apply to this session only; use Download settings.json to make them permanent.")
     cfg = copy.deepcopy(base_cfg)
-    for name, val in base_cfg["conversion_factors"].items():
-        cfg["conversion_factors"][name] = st.number_input(name, value=float(val), min_value=0.0, step=10.0,
-                                                          format="%.0f", key=f"f_{name}")
-    hs = next(i for b in cfg["blocks"] for i in b["inputs"] if i["kg_col"] == "X")
-    hs_choice = st.radio("MD HS Envelope stock is", ["MD HS Envelope Paper", "MD HS Envelope Foil"],
-                         index=0 if hs["factor_key"].endswith("Paper") else 1,
-                         help="The Stock Summary reports a single 'MD HS Envelope' machine line; "
-                              "pick which factor applies to it.")
-    hs["factor_key"] = hs_choice
-    st.download_button("Download settings.json", json.dumps(cfg, indent=2), "settings.json",
-                       help="Save these factors and replace config/settings.json to make them permanent.")
+    exact = st.toggle("Formulas exactly as in the approved report", value=base_cfg.get("factor_mode") != "own_block",
+                      help="On: the MD20 HS / MAISA / Perfecta Tag formulas read $I$4, $K$4 and $S$4 and Y4 "
+                           "shows 1200, exactly like the approved report. Off: every block reads its own "
+                           "factor (MD HS envelope = Paper 1425).")
+    cfg["factor_mode"] = "reference" if exact else "own_block"
+    with st.expander("Conversion factors (pieces per KG)"):
+        for name, val in base_cfg["conversion_factors"].items():
+            cfg["conversion_factors"][name] = st.number_input(name, value=float(val), min_value=0.0, step=10.0,
+                                                              format="%.0f", key=f"f_{name}")
+    st.download_button("Download settings.json", json.dumps(cfg, indent=2), "settings.json")
 
 # --------------------------------------------------------------------------- #
-# Uploads
+# Uploads -> the report is generated automatically once all three are in
 # --------------------------------------------------------------------------- #
 c1, c2, c3 = st.columns(3)
 with c1:
@@ -89,32 +99,24 @@ with c3:
     up_bom = st.file_uploader("3 · Exploded BOM Report", type=["xlsx", "xls"])
 
 with st.expander("Report template (optional)"):
-    st.write("The approved Tag & Env Stock workbook bundled with the app is used as the output format. "
-             "Upload a newer approved copy here only if the format has changed.")
+    st.write("The approved Tag & Env Stock workbook bundled with the app sets the rows, order and format. "
+             "Upload a newer approved copy here only if the approved report itself has changed.")
     up_tpl = st.file_uploader("Reference Tag & Env Stock workbook", type=["xlsx"], key="tpl")
 
-ready = all([up_stock, up_orders, up_bom])
-if st.button("Generate report", type="primary", disabled=not ready, width="stretch"):
+if all([up_stock, up_orders, up_bom]):
     try:
-        with st.spinner("Reading input files..."):
-            stock = _stock(up_stock.getvalue())
-            orders = _orders(up_orders.getvalue())
-            bom = _bom(up_bom.getvalue())
-        with st.spinner("Calculating and writing the report..."):
-            template = io.BytesIO(up_tpl.getvalue()) if up_tpl else TEMPLATE_PATH
-            result = build_report(stock, orders, bom, cfg, master=read_master_rows(template, cfg))
-            xlsx = write_report(result, cfg, template)
-            if up_tpl:
-                template.seek(0)
-            validation = validate_report(xlsx, template, result, cfg)
-        st.session_state["out"] = dict(result=result, xlsx=xlsx, validation=validation, cfg=cfg,
-                                       counts=(len(stock.items), len(orders), len(bom)))
+        with st.spinner("Generating the Tag & Env Stock report..."):
+            st.session_state["out"] = _generate(up_stock.getvalue(), up_orders.getvalue(), up_bom.getvalue(),
+                                                up_tpl.getvalue() if up_tpl else None,
+                                                json.dumps(cfg, sort_keys=True))
     except Exception as exc:  # show a readable message instead of a stack trace
         st.session_state.pop("out", None)
         st.error(f"Could not generate the report: {exc}")
-
-if not ready and "out" not in st.session_state:
-    st.info("Upload all three files to enable **Generate report**.")
+else:
+    st.session_state.pop("out", None)
+    missing = [n for n, f in [("Stock Summary", up_stock), ("Order Status", up_orders),
+                              ("Exploded BOM", up_bom)] if not f]
+    st.info("Upload " + ", ".join(missing) + " - the report is generated automatically once all three are in.")
 
 out = st.session_state.get("out")
 if out:
@@ -170,9 +172,9 @@ if out:
         if result.exceptions.empty:
             st.success("No exceptions.")
         else:
-            st.warning("These items could not be calculated reliably and were left blank in Make Cases "
-                       "(or were not placed on the report). Update the Exploded BOM export or "
-                       "config/settings.json, then regenerate.")
+            st.warning("These stock items have no usable Exploded-BOM qty. Their Make Cases use the divisor of "
+                       "the same row in the approved report where one exists, otherwise they are left blank. "
+                       "A newer Exploded BOM export removes most of them.")
             st.dataframe(result.exceptions, width="stretch", hide_index=True)
     with t5:
         def _color(v):

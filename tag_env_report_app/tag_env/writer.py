@@ -17,7 +17,7 @@ from datetime import date, datetime
 import openpyxl
 from openpyxl.utils import column_index_from_string, get_column_letter
 
-from .engine import ReportResult, cell_denominator
+from .engine import ReportResult, cell_denominator, factor_cell, row4_keys
 
 MAIN_SHEET = "Env & Tag Stock"
 REGION_SHEET = "Ghana & AB & AG Stock"
@@ -93,7 +93,34 @@ def _fill_main(ws, result: ReportResult, cfg: dict):
     # (the template fills them only on its first rows).
     for letter in (cfg["row_total"]["col"], cfg["remarks_col"]):
         row_style[_col(letter)] = _snapshot(ws.cell(FIRST_DATA_ROW, _col(letter)))
+    # Each reference row keeps its own formatting (per-cell number formats,
+    # alignment, borders), keyed by its label.
+    ref_style = {}
+    for r in data_rows:
+        lab = ws.cell(r, 1).value
+        if lab is not None and str(lab) not in ref_style:
+            ref_style[str(lab)] = {c: (None if isinstance(ws.cell(r, c), openpyxl.cell.cell.MergedCell)
+                                       else _snapshot(ws.cell(r, c))) for c in range(1, LAST_COL + 1)}
+    ref_blank = {}   # label -> columns the reference leaves empty on that row
+    for r in data_rows:
+        lab = ws.cell(r, 1).value
+        if lab is not None and str(lab) not in ref_blank:
+            ref_blank[str(lab)] = {c for c in range(2, LAST_COL + 1)
+                                   if ws.cell(r, c).value is None
+                                   and not isinstance(ws.cell(r, c), openpyxl.cell.cell.MergedCell)}
+    al_col = _col(cfg["row_total"]["col"])
+    al_rows = {str(ws.cell(r, 1).value) for r in data_rows if ws.cell(r, al_col).value is not None}
+    tpl_merges = []   # (first label, last label, min col, max col) of the reference's data-area merges
+    for m in ws.merged_cells.ranges:
+        if m.min_row >= FIRST_DATA_ROW and m.max_row < total_tpl_row:
+            a, b = ws.cell(m.min_row, 1).value, ws.cell(m.max_row, 1).value
+            if a is not None and b is not None:
+                tpl_merges.append((str(a), str(b), m.min_col, m.max_col))
+    keep_cols = set()
     total_style = {c: _snapshot(ws.cell(total_tpl_row, c)) for c in range(1, LAST_COL + 1)}
+    total_text = {c: ws.cell(total_tpl_row, c).value for c in range(1, LAST_COL + 1)
+                  if not str(ws.cell(total_tpl_row, c).value or "").startswith("=")
+                  and ws.cell(total_tpl_row, c).value is not None}
     row_height = ws.row_dimensions[FIRST_DATA_ROW + 1].height or 15.0
 
     # --- clear the old data area ------------------------------------------ #
@@ -104,17 +131,17 @@ def _fill_main(ws, result: ReportResult, cfg: dict):
     if result.report_date:
         ws["A1"].value = datetime.combine(result.report_date, datetime.min.time())
     factors = result.factors
-    for block in cfg["blocks"]:
-        for inp in block["inputs"]:
-            f = factors.get(inp["factor_key"])
-            if f is not None:
-                ws[f"{inp['cases_col']}4"].value = int(f) if float(f).is_integer() else f
+    for cell_ref, key in row4_keys(cfg).items():
+        f = factors.get(key)
+        if f is not None:
+            ws[cell_ref].value = int(f) if float(f).is_integer() else f
 
     # --- data rows --------------------------------------------------------- #
     r = FIRST_DATA_ROW
     for row in result.rows:
+        own = ref_style.get(row.label) if row.in_template else None
         for c in range(1, LAST_COL + 1):
-            _apply(ws.cell(r, c), row_style[c])
+            _apply(ws.cell(r, c), own[c] if own and own[c] and c not in keep_cols else row_style[c])
         ws.row_dimensions[r].height = row_height
         ws.cell(r, 1).value = row.label
         for block in cfg["blocks"]:
@@ -125,31 +152,60 @@ def _fill_main(ws, result: ReportResult, cfg: dict):
                 den = cell_denominator(row, kg_col)
                 if den:
                     d = int(den) if float(den).is_integer() else den
-                    ws[f"{cs_col}{r}"].value = f"=({kg_col}{r}*${cs_col}$4)/{d}"
+                    fc = factor_cell(inp, cfg)
+                    fcell = f"${re.match(r'[A-Z]+', fc).group(0)}${fc[len(re.match(r'[A-Z]+', fc).group(0)):]}"
+                    ws[f"{cs_col}{r}"].value = f"=({kg_col}{r}*{fcell})/{d}"
                 else:
                     ws[f"{cs_col}{r}"].value = None   # BOM qty unknown -> no number
             expr = block["max_formula"]
             ws[f"{block['max_col']}{r}"].value = "=" + re.sub(r"\{(\w+)\}", lambda m: f"{m.group(1)}{r}", expr)
-        ws[f"{cfg['row_total']['col']}{r}"].value = "=" + cfg["row_total"]["formula"].format(r=r)
+        if row.in_template:
+            # keep cells the reference leaves empty empty, as long as there is no stock for them
+            for block in cfg["blocks"]:
+                empty = [not (row.cells.get(i["kg_col"]) and row.cells[i["kg_col"]].items) for i in block["inputs"]]
+                for i, e in zip(block["inputs"], empty):
+                    for col in (i["kg_col"], i["cases_col"]):
+                        if e and _col(col) in ref_blank.get(row.label, ()):
+                            ws[f"{col}{r}"].value = None
+                if all(empty) and _col(block["max_col"]) in ref_blank.get(row.label, ()):
+                    ws[f"{block['max_col']}{r}"].value = None
+        if row.in_template and row.label in al_rows:   # the reference fills AL only on some rows
+            ws[f"{cfg['row_total']['col']}{r}"].value = "=" + cfg["row_total"]["formula"].format(r=r)
         ws[f"{cfg['remarks_col']}{r}"].value = row.remark
         r += 1
 
-    # --- shared tags: merge KG + cases cells across the brand's rows -------- #
-    inp_by_kg = {i["kg_col"]: i for b in cfg["blocks"] for i in b["inputs"]}
+    # --- merged cells: the reference report's own layout ------------------ #
+    # (e.g. a brand tag's KG / Can-Make cells spanning the brand's rows). A
+    # range is re-applied between the same first/last rows (also covering new
+    # rows slotted in between), unless a lower row has its own value there.
+    pos = {}
     for i, row in enumerate(result.rows):
-        for kg_col, n in row.merge_spans.items():
-            if n < 2:
+        if row.in_template:
+            pos.setdefault(row.label, FIRST_DATA_ROW + i)
+    kg_cols = {_col(i["kg_col"]): i["kg_col"] for b in cfg["blocks"] for i in b["inputs"]}
+    cs_to_kg = {_col(i["cases_col"]): i["kg_col"] for b in cfg["blocks"] for i in b["inputs"]}
+    for a, b, c0, c1 in tpl_merges:
+        if a not in pos or b not in pos or pos[b] < pos[a]:
+            continue
+        top, bot = pos[a], pos[b]
+        clash = False
+        for c in range(c0, c1 + 1):
+            kg = kg_cols.get(c) or cs_to_kg.get(c)
+            if kg is None:
                 continue
-            top = FIRST_DATA_ROW + i
-            for col in (kg_col, inp_by_kg[kg_col]["cases_col"]):
-                c = ws[f"{col}{top}"]
-                c.alignment = c.alignment.copy(horizontal="center", vertical="center")
-                ws.merge_cells(f"{col}{top}:{col}{top + n - 1}")
+            for rr in range(top + 1, bot + 1):
+                cell = result.rows[rr - FIRST_DATA_ROW].cells.get(kg)
+                if cell is not None and cell.items:
+                    clash = True
+        if not clash:
+            ws.merge_cells(start_row=top, start_column=c0, end_row=bot, end_column=c1)
 
     # --- total row ---------------------------------------------------------- #
     last = r - 1
     for c in range(1, LAST_COL + 1):
         _apply(ws.cell(r, c), total_style[c])
+        if c in total_text:
+            ws.cell(r, c).value = total_text[c]
     for block in cfg["blocks"]:
         for inp in block["inputs"]:
             k = inp["kg_col"]

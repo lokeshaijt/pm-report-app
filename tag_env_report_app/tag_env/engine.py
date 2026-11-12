@@ -123,6 +123,24 @@ def row_key(item: str, cfg: dict) -> tuple[str, str]:
     return prefix, re.sub(r"\s+", " ", key).strip().upper()
 
 
+def factor_cell(inp: dict, cfg: dict) -> str:
+    """Row-4 cell the Make Cases formula of this input reads (e.g. 'I4')."""
+    if cfg.get("factor_mode", "reference") == "own_block":
+        return f"{inp['cases_col']}4"
+    return inp.get("factor_cell", f"{inp['cases_col']}4")
+
+
+def row4_keys(cfg: dict) -> dict[str, str]:
+    """Row-4 cell -> conversion-factor name shown in that cell."""
+    if cfg.get("factor_mode", "reference") == "own_block":
+        return {f"{i['cases_col']}4": i["factor_key"] for b in cfg["blocks"] for i in b["inputs"]}
+    return dict(cfg["row4_factors"])
+
+
+def factor_key_for(inp: dict, cfg: dict) -> str:
+    return row4_keys(cfg).get(factor_cell(inp, cfg), inp["factor_key"])
+
+
 def _column_for(item: str, machine_line: str, cfg: dict):
     """Find the (block, input) a stock item feeds, by its Machine Line Name."""
     ml = norm(machine_line)
@@ -303,7 +321,7 @@ def build_report(stock: StockData, orders: pd.DataFrame, bom: pd.DataFrame, cfg:
             row.merge_spans[inp["kg_col"]] = max(row.merge_spans.get(inp["kg_col"], 1), len(group))
             row._groups = {**getattr(row, "_groups", {}), inp["kg_col"]: group}  # type: ignore[attr-defined]
 
-        fkey = inp["factor_key"]
+        fkey = factor_key_for(inp, cfg)
         calc = ItemCalc(item=item, machine_line=ml, kg=kg, kg_col=inp["kg_col"], cases_col=inp["cases_col"],
                         factor_key=fkey, factor=factors.get(fkey))
         hit = lookup.lookup(rec.item_norm)
@@ -440,7 +458,7 @@ def row_values(row: ReportRow, cfg: dict) -> dict[str, float | None]:
             cell = row.cells.get(inp["kg_col"], Cell())
             out[inp["kg_col"]] = cell.kg
             den = cell_denominator(row, inp["kg_col"])
-            f = factors.get(inp["factor_key"])
+            f = factors.get(factor_key_for(inp, cfg))
             out[inp["cases_col"]] = (cell.kg * f / den) if (den and f is not None) else None
         expr = block["max_formula"]
         vals = [out.get(c) or 0.0 for c in re.findall(r"\{(\w+)\}", expr)]

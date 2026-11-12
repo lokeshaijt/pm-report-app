@@ -21,6 +21,8 @@ pip install -r requirements.txt
 streamlit run app.py
 ```
 
+Upload the three files and the report is generated automatically.
+
 Command line (same output, prints the format-validation table):
 
 ```bash
@@ -127,15 +129,37 @@ Everything that might change lives in `config/settings.json`:
 * regional sections
 * grouping tokens
 
-The sidebar can also override the factors for one run, and its **Download settings.json**
-button saves them.
+The sidebar can override the factors for one session (defaults need no change), and its
+**Download settings.json** button saves them.
 
-## Differences from the manually prepared reference (28-10-26)
+## Matching the approved report exactly
 
-* The manual sheet's MD20 HS, MAISA and Perfecta-Tag blocks referenced the wrong factor
-  cells (`$K$4` = 1700 instead of 1200 / 1410, `$S$4` = 1520 instead of 10780). Each block
-  now uses its own factor.
-* The HS envelope factor follows the conversion table (Paper 1425 by default; Foil 1190 can
-  be picked in the sidebar). The manual sheet used 1200.
-* External links to the ERP workbook (`[1]Stock Summary…`) are replaced by values, so the
-  file opens without an *update links* prompt. Excel recalculates all formulas on open.
+The generated workbook is a copy of the approved report with only the data replaced:
+
+* **Rows:** the same rows, labels and order, each with that row's own formatting.
+* **Merged cells:** the same merged ranges, such as the brand tag cells.
+* **Row 4 and formulas:** the same row-4 values and the same formula shapes. In the
+  default `"factor_mode": "reference"`, the MD20 HS / MAISA / Perfecta Tag formulas read
+  `$I$4`, `$K$4` and `$S$4`, and Y4 shows 1200, as in the approved report.
+* **AL and AM:** the same AL cells, and the same total row.
+
+The *Format validation* tab checks each reference row's formatting and formula shape
+against the same row in the approved report.
+
+Deliberate differences:
+
+* **Remarks (AM)** are filled for every row (`Order Received` / `No Order` /
+  `BOM not found`), with the approved report's formatting for that cell.
+* **MD20 HS columns V and X** hold the stock KG as values. In the approved report they are
+  lookups into another workbook (`[1]MD-20 HS`), which would break and prompt to
+  *update links*.
+* **New stock items** with no row in the approved report get a new row in alphabetical
+  position.
+* **Factor mode:** to have each block use its own factor instead, set
+  `"factor_mode": "own_block"` (or switch off *Formulas exactly as in the approved
+  report* in the sidebar). The MD HS envelope then uses the Paper factor 1425.
+
+## Automatic generation
+
+As soon as all three files are uploaded, the report is generated. The preview, checks and
+download appear with no further steps, and changing a file or a setting regenerates it.

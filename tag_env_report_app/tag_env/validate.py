@@ -8,7 +8,7 @@ import openpyxl
 import pandas as pd
 from openpyxl.cell.cell import MergedCell
 
-from .engine import ReportResult
+from .engine import ReportResult, factor_cell, row4_keys
 
 MAIN = "Env & Tag Stock"
 REGION = "Ghana & AB & AG Stock"
@@ -47,7 +47,7 @@ def validate_report(xlsx: bytes, template_path, result: ReportResult, cfg: dict)
     add("Column widths", not bad, "identical" if not bad else "differs: " + ", ".join(bad[:10]))
 
     o, t = out[MAIN], tpl[MAIN]
-    factor_cells = {f"{i['cases_col']}4" for b in cfg["blocks"] for i in b["inputs"]}
+    factor_cells = set(row4_keys(cfg))
 
     # 3. header rows 1-4 (text + styles)
     diff_val, diff_sty = [], []
@@ -69,7 +69,7 @@ def validate_report(xlsx: bytes, template_path, result: ReportResult, cfg: dict)
     add("Row heights (header)", all(t.row_dimensions[r].height == o.row_dimensions[r].height for r in range(1, 5)), "")
 
     # 4. conversion factors in row 4
-    fac = {f"{i['cases_col']}4": cfg["conversion_factors"][i["factor_key"]] for b in cfg["blocks"] for i in b["inputs"]}
+    fac = {k: cfg["conversion_factors"][v] for k, v in row4_keys(cfg).items()}
     wrong = [f"{k}={o[k].value} (expected {v})" for k, v in fac.items() if o[k].value != v]
     add("Conversion factors in row 4 match config", not wrong,
         "; ".join(f"{k}={v}" for k, v in fac.items()) if not wrong else "; ".join(wrong))
@@ -88,6 +88,44 @@ def validate_report(xlsx: bytes, template_path, result: ReportResult, cfg: dict)
            if (r, c) not in merged and _sk(o.cell(r, c)) not in allowed[c]]
     add("Data-row formatting copied from template rows", not bad,
         f"{n} rows checked" if not bad else f"{len(bad)} cells differ, e.g. {', '.join(bad[:8])}")
+    # reference rows: same formatting and same formula shape as that row in the reference
+    t_rows = {}
+    for r in range(5, t_total):
+        lab = t.cell(r, 1).value
+        if lab is not None and lab not in t_rows:
+            t_rows[lab] = r
+    skip_cols = {openpyxl.utils.column_index_from_string(cfg["row_total"]["col"]),
+                 openpyxl.utils.column_index_from_string(cfg["remarks_col"])}
+
+    def shape(v, row):
+        if isinstance(v, str) and v.startswith("="):
+            v = re.sub(rf"([A-Z]+){row}\b", r"\1#", v)
+            return re.sub(r"/[\d.]+$", "/n", v)
+        return "value" if v is not None else None
+
+    sty_bad, f_bad, checked = [], [], 0
+    t_merged = set()
+    for m in t.merged_cells.ranges:
+        t_merged |= {(r, c) for r in range(m.min_row, m.max_row + 1) for c in range(m.min_col, m.max_col + 1)}
+    for i, row in enumerate(result.rows):
+        tr = t_rows.get(row.label)
+        if not row.in_template or tr is None:
+            continue
+        orow = first + i
+        checked += 1
+        for c in range(1, 40):
+            if c in skip_cols or (orow, c) in merged or (tr, c) in t_merged:
+                continue
+            if _sk(o.cell(orow, c)) != _sk(t.cell(tr, c)):
+                sty_bad.append(o.cell(orow, c).coordinate)
+            tv, ov = t.cell(tr, c).value, o.cell(orow, c).value
+            if isinstance(tv, str) and tv.startswith("=") and "[" not in tv and shape(tv, tr) != shape(ov, orow):
+                f_bad.append(f"{o.cell(orow, c).coordinate}: {ov} (reference {tv})")
+    add("Reference rows: formatting identical to the same row in the reference", not sty_bad,
+        f"{checked} rows" if not sty_bad else f"{len(sty_bad)} cells, e.g. {', '.join(sty_bad[:8])}")
+    add("Reference rows: formulas identical to the reference (only KG and BOM divisor change)", not f_bad,
+        f"{checked} rows" if not f_bad else f"{len(f_bad)} cells, e.g. {'; '.join(f_bad[:3])}")
+
     n_m = sum(1 for m in o.merged_cells.ranges if m.min_row >= first)
     add("Shared-tag cells merged across brand rows (as in the reference)", None, f"{n_m} merged ranges")
     rows_new = sum(1 for r in result.rows if not r.in_template)
@@ -105,7 +143,9 @@ def validate_report(xlsx: bytes, template_path, result: ReportResult, cfg: dict)
             if v is None:
                 blanks += 1 if (o[f"{kg}{r}"].value or 0) else 0
                 continue
-            m = re.fullmatch(rf"=\({kg}{r}\*\${cs}\$4\)/([\d.]+)", str(v))
+            fc = factor_cell(next(i for b in cfg["blocks"] for i in b["inputs"] if i["cases_col"] == cs), cfg)
+            col_l = re.match(r"[A-Z]+", fc).group(0)
+            m = re.fullmatch(rf"=\({kg}{r}\*\${col_l}\${fc[len(col_l):]}\)/([\d.]+)", str(v))
             if not m or float(m.group(1)) < 1:
                 bad.append(f"{cs}{r}")
             else:

@@ -1,0 +1,70 @@
+{
+  "_readme": "Edit this file to change conversion factors or mappings - no code changes needed. Factors are pieces per KG ('Conversion Round Off' table).",
+
+  "conversion_factors": {
+    "Constanta Envelope": 1525,
+    "MD-20 Crimp Envelope": 1700,
+    "MD HS Envelope Paper": 1425,
+    "MD HS Envelope Foil": 1190,
+    "Perfecta Envelope (PENV)": 1520,
+    "Maisa Envelope": 1410,
+    "CONSTANTA-250": 1740,
+    "CONSTANTA FAMILY SIZE": 6320,
+    "Constanta Tag Big": 6040,
+    "MD-20 Tag": 12600,
+    "Maisa Tag": 9080,
+    "PERFACTA TAG & PK-45 & Constanta Tag": 10780
+  },
+
+  "_blocks_readme": "One entry per brand block on the 'Env & Tag Stock' sheet. kg_col = KG column, cases_col = Can-Make-Cases column, the factor is written in row 4 of cases_col, factor_key = key into conversion_factors, machine_lines = Stock Summary 'Machine Line Name' values that feed this column. hs_only=true means only items whose name contains the token 'HS'; hs_excluded=true means items with 'HS' are skipped here (they go to the HS block).",
+  "blocks": [
+    {"name": "C250", "max_col": "F", "max_formula": "MAX({C},{E})", "inputs": [
+      {"kind": "TAG", "kg_col": "B", "cases_col": "C", "factor_key": "PERFACTA TAG & PK-45 & Constanta Tag", "machine_lines": ["Constanta Tag"]},
+      {"kind": "ENV", "kg_col": "D", "cases_col": "E", "factor_key": "CONSTANTA-250", "machine_lines": ["CONSTANTA-250"]}
+    ]},
+    {"name": "MD20", "max_col": "L", "max_formula": "MAX({I},{K})", "inputs": [
+      {"kind": "TAG", "kg_col": "H", "cases_col": "I", "factor_key": "MD-20 Tag", "machine_lines": ["MD-20 Tag"], "hs_excluded": true},
+      {"kind": "ENV", "kg_col": "J", "cases_col": "K", "factor_key": "MD-20 Crimp Envelope", "machine_lines": ["MD-20 Crimp Envelope"]}
+    ]},
+    {"name": "Constanta", "max_col": "P", "max_formula": "MAX({O})", "inputs": [
+      {"kind": "ENV", "kg_col": "N", "cases_col": "O", "factor_key": "Constanta Envelope", "machine_lines": ["Constanta Envelope"]}
+    ]},
+    {"name": "Perfecta", "max_col": "T", "max_formula": "{S}", "inputs": [
+      {"kind": "ENV", "kg_col": "R", "cases_col": "S", "factor_key": "Perfecta Envelope (PENV)", "machine_lines": ["Perfecta Envelope (PENV)"]}
+    ]},
+    {"name": "MD20 HS", "max_col": "Z", "max_formula": "MAX({W},{Y})", "inputs": [
+      {"kind": "TAG", "kg_col": "V", "cases_col": "W", "factor_key": "MD-20 Tag", "machine_lines": ["MD-20 Tag"], "hs_only": true},
+      {"kind": "ENV", "kg_col": "X", "cases_col": "Y", "factor_key": "MD HS Envelope Paper", "machine_lines": ["MD HS Envelope", "MD HS Envelope Paper", "MD HS Envelope Foil"]}
+    ]},
+    {"name": "MAISA", "max_col": "AF", "max_formula": "MAX({AC},{AE})", "inputs": [
+      {"kind": "TAG", "kg_col": "AB", "cases_col": "AC", "factor_key": "Maisa Tag", "machine_lines": ["Maisa Tag"]},
+      {"kind": "ENV", "kg_col": "AD", "cases_col": "AE", "factor_key": "Maisa Envelope", "machine_lines": ["Maisa Envelope"]}
+    ]},
+    {"name": "Perfecta Tag / PK45", "max_col": "AJ", "max_formula": "{AI}", "inputs": [
+      {"kind": "TAG", "kg_col": "AH", "cases_col": "AI", "factor_key": "PERFACTA TAG & PK-45 & Constanta Tag", "machine_lines": ["PK-45", "PERFACTA TAG"]}
+    ]}
+  ],
+
+  "_total_readme": "Column AL in the reference report = F+L+P+T (kept exactly as the reference).",
+  "row_total": {"col": "AL", "formula": "F{r}+L{r}+P{r}+T{r}"},
+  "remarks_col": "AM",
+
+  "_bom_readme": "Exploded BOM: the denominator of Make Cases is the 'Qty' (PCS) of the ENV/TAG item per case of the FG. Only FGs whose 'FG Uom' is in case_uoms are used; a qty below min_pcs_per_case is treated as a BOM data error and ignored.",
+  "bom": {"case_uoms": ["CFC"], "component_uom": "PCS", "min_pcs_per_case": 1},
+
+  "remarks": {"with_order": "Order Received", "no_order": "No Order", "no_bom": "BOM not found"},
+
+  "_regions_readme": "Items whose name contains one of these markers go to the 'Ghana & AB & AG Stock' sheet instead of the main sheet. 'extra_items' are exact item names that the reference report also lists in that section.",
+  "regions": [
+    {"title": "GHANA STOCK", "marker": "(GHANA)", "extra_items": ["ENV INDUS DC TBGS (70GSM)"], "has_tag_col": true},
+    {"title": "ABHIDJAN STOCK", "marker": "(ABIDJAN)", "extra_items": [], "has_tag_col": false},
+    {"title": "ANGOLA STOCK", "marker": "(ANGOLA)", "extra_items": [], "has_tag_col": false}
+  ],
+
+  "_grouping_readme": "Row grouping on the main sheet: an item's row key is its name without the ENV/TAG prefix, cut at the first machine token, plus anything after the trailing 'TBGS' (e.g. (MATADI), -FT, (v2)). Qualifiers listed in ignore_qualifiers are dropped so e.g. 'ENV AL FINA DC ENV (70 GSM)' joins the 'AL FINA' row.",
+  "grouping": {
+    "machine_tokens": ["DC", "C250", "PK45", "PTAG", "PENV"],
+    "ignore_qualifiers": ["\\(\\s*\\d+\\s*GSM\\s*\\)", "\\(\\s*WO\\s*GLUE\\s*\\)"],
+    "item_prefixes": ["ENV", "TAG"]
+  }
+}

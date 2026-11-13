@@ -64,7 +64,11 @@
   "_bom_readme": "Exploded BOM: the denominator of Make Cases is the 'Qty' (PCS) of the ENV/TAG item per case of the FG. Only FGs whose 'FG Uom' is in case_uoms are used; a qty below min_pcs_per_case is treated as a BOM data error and ignored.",
   "bom": {"case_uoms": ["CFC"], "component_uom": "PCS", "min_pcs_per_case": 1},
 
-  "remarks": {"with_order": "Order Received", "no_order": "No Order", "no_bom": "BOM not found", "no_stock": ""},
+  "_remarks_readme": "Remarks (column AM), first rule that applies: 'running' = the brand is marked Running (carried forward from the reference report's remarks, or listed in running_rows / ticked in the app) and still has a pending order; 'multiline' = envelope stock on 2 or more machine lines (ENV columns); 'with_order' = any FG of the row's items has a pending order (Order Status Report); 'no_order' = otherwise. Rows with no stock get no_stock.",
+  "remarks": {"running": "Running", "multiline": "Multiline Stock", "with_order": "Order Received",
+              "no_order": "Leftover Stock", "no_stock": ""},
+  "running_carry_forward": true,
+  "running_rows": [],
 
   "_regions_readme": "Items whose name contains one of these markers go to the 'Ghana & AB & AG Stock' sheet instead of the main sheet. 'extra_items' are exact item names that the reference report also lists in that section.",
   "regions": [

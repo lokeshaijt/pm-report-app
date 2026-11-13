@@ -62,6 +62,8 @@ class ReportRow:
     row_denominator: float | None = None                   # fallback for empty cells
     in_template: bool = False                              # row exists in the reference report
     template_dens: dict[str, float] = field(default_factory=dict)  # kg_col -> reference divisor
+    prev_remarks: set[str] = field(default_factory=set)            # remarks in the reference report
+    running: bool = False                                          # marked as running on a machine
     merge_spans: dict[str, int] = field(default_factory=dict)      # kg_col -> rows a shared tag spans
 
 
@@ -248,7 +250,8 @@ def build_report(stock: StockData, orders: pd.DataFrame, bom: pd.DataFrame, cfg:
         _, key = row_key(m.label, cfg)
         if key in by_key:
             continue
-        row = ReportRow(key=key, label=m.label, in_template=True, template_dens=dict(m.dens))
+        row = ReportRow(key=key, label=m.label, in_template=True, template_dens=dict(m.dens),
+                        prev_remarks=set(getattr(m, "prev_remarks", set())))
         master_rows.append(row)
         by_key[key] = row
     master_index = {r.key: i for i, r in enumerate(master_rows)}
@@ -383,29 +386,40 @@ def build_report(stock: StockData, orders: pd.DataFrame, bom: pd.DataFrame, cfg:
 
     # ---- divisors and remarks ------------------------------------------- #
     rc = cfg["remarks"]
+    env_cols = {i["kg_col"] for b in cfg["blocks"] for i in b["inputs"] if i["kind"] == "ENV"}
+    run_word = norm(rc.get("running", "Running"))
+    running_set = {norm(x) for x in (cfg.get("running_rows") or [])}
     for row in ordered_rows:
-        any_order = any_bom = any_item = False
+        any_order = any_item = False
         rep = None
         for col, cell in row.cells.items():
             if not cell.items:
                 continue
             any_item = True
             with_bom = [c for c in cell.items if c.bom_found]
+            any_order |= any(c.has_order for c in with_bom)
             if with_bom:
                 # the item with a pending order (largest pending), else the most KG
                 best = sorted(with_bom, key=lambda c: (c.has_order, c.pending_qty, c.kg), reverse=True)[0]
                 cell.denominator, cell.den_source = best.bom_qty, "Exploded BOM"
-                any_bom = True
-                any_order |= any(c.has_order for c in with_bom)
                 if rep is None or (best.has_order and not rep[1]):
                     rep = (best.bom_qty, best.has_order)
             elif row.template_dens.get(col):
                 cell.denominator, cell.den_source = row.template_dens[col], "Reference report"
         row.row_denominator = rep[0] if rep else None
+        row.running = norm(row.label) in running_set or (
+            cfg.get("running_carry_forward", True) and any(norm(x) == run_word for x in row.prev_remarks))
+        n_env_lines = sum(1 for c in env_cols if c in row.cells and row.cells[c].items and row.cells[c].kg > 0)
         if not any_item:
             row.remark = rc.get("no_stock", "")
+        elif row.running and any_order:
+            row.remark = rc["running"]
+        elif n_env_lines >= 2:
+            row.remark = rc["multiline"]
+        elif any_order:
+            row.remark = rc["with_order"]
         else:
-            row.remark = rc["with_order"] if any_order else (rc["no_order"] if any_bom else rc["no_bom"])
+            row.remark = rc["no_order"]
 
     for r in ordered_rows:
         for cell in r.cells.values():

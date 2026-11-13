@@ -72,8 +72,21 @@ for each item. Nothing is hardcoded.
   there too.
 
 `Max Can Make` and the `AL` column keep the reference formulas (`MAX(C,E)`, `=S`,
-`F+L+P+T`). **Remarks**: `Order Received` if any FG of the row's items has a pending order,
-`No Order` if not, and `BOM not found` if none of the row's items is in the BOM.
+`F+L+P+T`).
+
+**Remarks (column AM)** use the approved report's vocabulary. The first rule that
+applies wins:
+
+| Remark | Rule |
+|---|---|
+| **Running** | The brand is marked running and still has a pending order. Running can't be read from the three ERP files, so it's carried forward from the previous report's remarks, and the app's *Running brands* list lets you tick or untick brands. |
+| **Multiline Stock** | Envelope stock on 2 or more machine lines (C250 / MD20 / Constanta / Perfecta / HS / Maisa envelope columns). |
+| **Order Received** | Any FG of the row's items has a pending order in the Order Status Report. |
+| **Leftover Stock** | No pending order. |
+
+Rows with no stock get no remark. The wording and the `running_rows` list are in
+`config/settings.json`. Upload the latest approved report as the template to carry its
+Running marks forward.
 
 ### Rows
 
@@ -148,8 +161,8 @@ against the same row in the approved report.
 
 Deliberate differences:
 
-* **Remarks (AM)** are filled for every row (`Order Received` / `No Order` /
-  `BOM not found`), with the approved report's formatting for that cell.
+* **Remarks (AM)** are filled for every row with stock (Running / Multiline Stock /
+  Order Received / Leftover Stock), with the approved report's formatting for that cell.
 * **MD20 HS columns V and X** hold the stock KG as values. In the approved report they are
   lookups into another workbook (`[1]MD-20 HS`), which would break and prompt to
   *update links*.

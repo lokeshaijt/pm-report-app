@@ -110,6 +110,23 @@ with st.expander("Report template (optional)"):
              "Upload a newer approved copy here only if the approved report itself has changed.")
     up_tpl = st.file_uploader("Reference Tag & Env Stock workbook", type=["xlsx"], key="tpl")
 
+# Running brands: carried forward from the reference report's remarks; editable here.
+_tpl_src = io.BytesIO(up_tpl.getvalue()) if up_tpl else TEMPLATE_PATH
+_master = read_master_rows(_tpl_src, cfg)
+_labels = [m.label for m in _master]
+_run_word = cfg["remarks"].get("running", "Running").strip().upper()
+_default_run = [m.label for m in _master if any(r.strip().upper() == _run_word for r in m.prev_remarks)]
+with st.expander(f"Running brands ({len(_default_run)} carried forward from the previous report)"):
+    st.caption("Remarks rule (first match): **Running** = ticked here and has a pending order -> "
+               "**Multiline Stock** = envelope stock on 2+ machine lines -> **Order Received** = pending "
+               "order in the Order Status Report -> **Leftover Stock** = no pending order. "
+               "Running cannot be read from the three ERP files, so it is taken from the previous "
+               "report; tick or untick brands that are on a machine now.")
+    running = st.multiselect("Brands running on a machine", _labels, default=_default_run,
+                             format_func=lambda x: x.strip())
+cfg["running_rows"] = [r for r in running]
+cfg["running_carry_forward"] = False
+
 if all([up_stock, up_orders, up_bom]):
     try:
         with st.spinner("Generating the Tag & Env Stock report..."):

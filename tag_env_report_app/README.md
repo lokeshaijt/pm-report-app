@@ -163,6 +163,8 @@ against the same row in the approved report.
 Deliberate differences:
 
 * **Remarks (AM)** are left empty (switch on with `"fill_remarks": true`).
+* **Column AL** (`=F+L+P+T`, including AL4) is left empty (switch on with
+  `"row_total": {"fill": true}`).
 * **MD20 HS columns V and X** hold the stock KG as values. In the approved report they are
   lookups into another workbook (`[1]MD-20 HS`), which would break and prompt to
   *update links*.

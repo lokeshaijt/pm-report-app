@@ -130,6 +130,8 @@ def _fill_main(ws, result: ReportResult, cfg: dict):
     # --- header: date + conversion factors -------------------------------- #
     if result.report_date:
         ws["A1"].value = datetime.combine(result.report_date, datetime.min.time())
+    if not cfg["row_total"].get("fill", True):
+        ws[f"{cfg['row_total']['col']}4"].value = None      # AL4 '=F4+L4+P4+T4' too
     factors = result.factors
     for cell_ref, key in row4_keys(cfg).items():
         f = factors.get(key)
@@ -169,7 +171,7 @@ def _fill_main(ws, result: ReportResult, cfg: dict):
                             ws[f"{col}{r}"].value = None
                 if all(empty) and _col(block["max_col"]) in ref_blank.get(row.label, ()):
                     ws[f"{block['max_col']}{r}"].value = None
-        if row.in_template and row.label in al_rows:   # the reference fills AL only on some rows
+        if cfg["row_total"].get("fill", True) and row.in_template and row.label in al_rows:   # the reference fills AL only on some rows
             ws[f"{cfg['row_total']['col']}{r}"].value = "=" + cfg["row_total"]["formula"].format(r=r)
         ws[f"{cfg['remarks_col']}{r}"].value = row.remark if cfg.get("fill_remarks", False) else None
         r += 1

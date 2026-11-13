@@ -57,8 +57,8 @@
     ]}
   ],
 
-  "_total_readme": "Column AL in the reference report = F+L+P+T (kept exactly as the reference).",
-  "row_total": {"col": "AL", "formula": "F{r}+L{r}+P{r}+T{r}"},
+  "_total_readme": "Column AL in the reference report = F+L+P+T. fill=false leaves AL empty (also AL4); fill=true writes it on the same rows as the reference.",
+  "row_total": {"col": "AL", "formula": "F{r}+L{r}+P{r}+T{r}", "fill": false},
   "remarks_col": "AM",
 
   "_bom_readme": "Exploded BOM: the denominator of Make Cases is the 'Qty' (PCS) of the ENV/TAG item per case of the FG. Only FGs whose 'FG Uom' is in case_uoms are used; a qty below min_pcs_per_case is treated as a BOM data error and ignored.",

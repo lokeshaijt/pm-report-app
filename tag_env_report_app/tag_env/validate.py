@@ -56,7 +56,8 @@ def validate_report(xlsx: bytes, template_path, result: ReportResult, cfg: dict)
             tc, oc = t.cell(r, c), o.cell(r, c)
             if isinstance(tc, MergedCell):
                 continue
-            if tc.coordinate not in factor_cells | {"A1"} and tc.value != oc.value:
+            emptied = set() if cfg["row_total"].get("fill", True) else {f"{cfg['row_total']['col']}4"}
+            if tc.coordinate not in factor_cells | {"A1"} | emptied and tc.value != oc.value:
                 diff_val.append(tc.coordinate)
             if _sk(tc) != _sk(oc):
                 diff_sty.append(tc.coordinate)

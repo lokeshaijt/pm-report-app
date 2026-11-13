@@ -74,8 +74,9 @@ for each item. Nothing is hardcoded.
 `Max Can Make` and the `AL` column keep the reference formulas (`MAX(C,E)`, `=S`,
 `F+L+P+T`).
 
-**Remarks (column AM)** use the approved report's vocabulary. The first rule that
-applies wins:
+**Remarks (column AM)** are left **empty** by default (`"fill_remarks": false`); the
+`Remarks` header and formatting stay. With `"fill_remarks": true` they use the approved
+report's vocabulary, and the first rule that applies wins:
 
 | Remark | Rule |
 |---|---|
@@ -161,8 +162,7 @@ against the same row in the approved report.
 
 Deliberate differences:
 
-* **Remarks (AM)** are filled for every row with stock (Running / Multiline Stock /
-  Order Received / Leftover Stock), with the approved report's formatting for that cell.
+* **Remarks (AM)** are left empty (switch on with `"fill_remarks": true`).
 * **MD20 HS columns V and X** hold the stock KG as values. In the approved report they are
   lookups into another workbook (`[1]MD-20 HS`), which would break and prompt to
   *update links*.

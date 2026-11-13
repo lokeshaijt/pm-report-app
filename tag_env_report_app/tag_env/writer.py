@@ -171,7 +171,7 @@ def _fill_main(ws, result: ReportResult, cfg: dict):
                     ws[f"{block['max_col']}{r}"].value = None
         if row.in_template and row.label in al_rows:   # the reference fills AL only on some rows
             ws[f"{cfg['row_total']['col']}{r}"].value = "=" + cfg["row_total"]["formula"].format(r=r)
-        ws[f"{cfg['remarks_col']}{r}"].value = row.remark
+        ws[f"{cfg['remarks_col']}{r}"].value = row.remark if cfg.get("fill_remarks", False) else None
         r += 1
 
     # --- merged cells: the reference report's own layout ------------------ #

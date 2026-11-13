@@ -37,7 +37,8 @@ def preview_frame(result: ReportResult, cfg: dict) -> pd.DataFrame:
         for blk, col, name in cols:
             rec[f"{blk} | {name} ({col})"] = v.get(col)
         rec["Total (AL)"] = v.get(cfg["row_total"]["col"])
-        rec["Remarks"] = row.remark
+        if cfg.get("fill_remarks", False):
+            rec["Remarks"] = row.remark
         recs.append(rec)
     return pd.DataFrame(recs)
 

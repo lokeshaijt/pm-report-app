@@ -116,14 +116,16 @@ _master = read_master_rows(_tpl_src, cfg)
 _labels = [m.label for m in _master]
 _run_word = cfg["remarks"].get("running", "Running").strip().upper()
 _default_run = [m.label for m in _master if any(r.strip().upper() == _run_word for r in m.prev_remarks)]
-with st.expander(f"Running brands ({len(_default_run)} carried forward from the previous report)"):
-    st.caption("Remarks rule (first match): **Running** = ticked here and has a pending order -> "
-               "**Multiline Stock** = envelope stock on 2+ machine lines -> **Order Received** = pending "
-               "order in the Order Status Report -> **Leftover Stock** = no pending order. "
-               "Running cannot be read from the three ERP files, so it is taken from the previous "
-               "report; tick or untick brands that are on a machine now.")
-    running = st.multiselect("Brands running on a machine", _labels, default=_default_run,
-                             format_func=lambda x: x.strip())
+running = _default_run
+if cfg.get("fill_remarks", False):   # Remarks column is left empty by default
+    with st.expander(f"Running brands ({len(_default_run)} carried forward from the previous report)"):
+        st.caption("Remarks rule (first match): **Running** = ticked here and has a pending order -> "
+                   "**Multiline Stock** = envelope stock on 2+ machine lines -> **Order Received** = pending "
+                   "order in the Order Status Report -> **Leftover Stock** = no pending order. "
+                   "Running cannot be read from the three ERP files, so it is taken from the previous "
+                   "report; tick or untick brands that are on a machine now.")
+        running = st.multiselect("Brands running on a machine", _labels, default=_default_run,
+                                 format_func=lambda x: x.strip())
 cfg["running_rows"] = [r for r in running]
 cfg["running_carry_forward"] = False
 

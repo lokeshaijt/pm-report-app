@@ -91,7 +91,7 @@ def generate_report(export_file, domestic_file, pending_po_file, stock_file,
 
     # ---- 5. Weekly cascade (8-week rolling window, starting today) ----
     prog(0.45, "Running the 8-week cascade...")
-    WEEKS, WEEK_BOUNDS, RANGE_START, RANGE_END = build_week_window(today, num_weeks=8)
+    WEEKS, WEEK_BOUNDS, RANGE_START, RANGE_END = build_week_window(today, num_weeks=12)
     fg_weekly_demand = aggregate_weekly(demand_rows, WEEKS, WEEK_BOUNDS, RANGE_START, RANGE_END)
     weekly_pending_delivery = aggregate_weekly(
         [(k, d, q) for k, d, q in po_rows], WEEKS, WEEK_BOUNDS, RANGE_START, RANGE_END

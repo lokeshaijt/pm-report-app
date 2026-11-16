@@ -23,7 +23,7 @@ from datetime import date, datetime, timedelta
 import openpyxl
 
 from .utils import norm_disp
-from .weeks import week_number_for, week_bounds
+from .weeks import week_number_for, week_bounds, week_start_containing
 
 STORE_FROM_WAREHOUSES = {"WH-PM-MDKCBE", "WH-PM-MDKCBE2"}
 REQUIRED_HEADERS = ("Transaction Type", "Item_Name", "Movement Type", "Doc_Date", "Qty")
@@ -148,18 +148,31 @@ def filter_last_n_completed_weeks(rows, today, n=6):
     Keeps only rows whose date falls in the N most recently *completed*
     weeks before today's own (in-progress) week - e.g. on a day in week 40,
     "last 6 weeks" means weeks 34-39, not weeks 35-40.
+
+    Filtered by actual calendar date, not by subtracting n from today's week
+    number - week numbers reset to 1 at each new year (see weeks.py), so a
+    lookback that spans a reset can't be treated as one continuously
+    increasing sequence of integers.
     """
-    current_week = week_number_for(today)
-    min_week, max_week = current_week - n, current_week - 1
-    return [r for r in rows if min_week <= week_number_for(r["date"]) <= max_week]
+    current_week_start = week_start_containing(today)
+    range_end = current_week_start - timedelta(days=1)
+    range_start = current_week_start - timedelta(days=7 * n)
+    return [r for r in rows if r["date"] is not None and range_start <= r["date"] <= range_end]
 
 
 def last_n_completed_weeks(today, n=4):
     """The N most recently completed week numbers before today's own
     (in-progress) week, oldest first - e.g. on a day in week 41, n=4 gives
-    [37, 38, 39, 40]."""
-    current_week = week_number_for(today)
-    return list(range(current_week - n, current_week))
+    [37, 38, 39, 40]. Each number is resolved from its own week's actual
+    start date (walking backward from today day by day) rather than by
+    subtracting n from today's week number, since that breaks across a
+    year-end reset back to Week 1 (see weeks.py)."""
+    s = week_start_containing(today)
+    weeks = []
+    for _ in range(n):
+        s -= timedelta(days=7)
+        weeks.append(week_number_for(s))
+    return list(reversed(weeks))
 
 
 def pivot_weekwise(rows, weeks):

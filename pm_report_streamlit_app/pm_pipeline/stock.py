@@ -2,7 +2,13 @@
 Stock Report parser.
 
 The source file's layout has varied run to run:
-  - Sometimes a raw dump sheet (Location_Name, Warehouse_Name, Item_Name, ..., Qty Total)
+  - Sometimes a raw dump sheet (Location_Name, Warehouse_Name, Item_Name, ..., Qty Total),
+    with those columns packed close together; sometimes the same sheet
+    spreads them out much further apart (e.g. 10-Nov-2026: Location_Name in
+    column 1, Warehouse_Name in column 4, Item_Name in column 9, Qty Total
+    in column 16, with other report-filter columns in between) - so these 3
+    columns are always located by header name across a wide scan range,
+    never a fixed/narrow column window.
   - Sometimes a ready-made pivot, headed either "Row Labels" or "Item_Name" in
     column A, then one column per warehouse, then Grand Total
     - sometimes with all 4 target warehouses as columns, sometimes with only
@@ -10,6 +16,10 @@ The source file's layout has varied run to run:
     - sometimes with *extra*, non-target warehouse columns too (e.g.
       WH-FG-MDKCBE/2, finished-goods warehouses, seen from 15-Oct-2026) -
       these must be excluded, not folded in
+  - A raw dump can also carry "<Warehouse> Total" subtotal rows mixed in
+    among the per-item rows (seen from 10-Nov-2026) - these are skipped
+    automatically since "WH-PM-MDKCBE Total" etc. never exactly matches a
+    TARGET_LOCATIONS entry.
 
 Current stock is always: sum of on-hand quantity across exactly these 4
 locations. For a raw dump sheet that's a straightforward filter on
@@ -22,6 +32,8 @@ from collections import defaultdict
 from .utils import norm
 
 TARGET_LOCATIONS = {"WH-PM-MDKCBE", "WH-PM-MDKCBE2", "WH-PZ1-MDKCBE", "WH-PZ1-MDKCBE2"}
+RAW_SCAN_COLS = 40
+RAW_REQUIRED_HEADERS = ("Warehouse_Name", "Item_Name", "Qty Total")
 
 
 def _find_header_row(ws, max_scan=15):
@@ -36,7 +48,8 @@ def _find_header_row(ws, max_scan=15):
     for r in range(1, max_scan + 1):
         vals = [ws.cell(r, c).value for c in range(1, 8)]
         if vals[0] == "Location_Name":
-            score = sum(1 for h in ("Warehouse_Name", "Item_Name", "Qty Total") if h in vals)
+            wide = [ws.cell(r, c).value for c in range(1, RAW_SCAN_COLS + 1)]
+            score = sum(1 for h in RAW_REQUIRED_HEADERS if h in wide)
             candidates.append((r, "raw", score))
         elif vals[0] in ("Row Labels", "Item_Name"):
             full_header = [ws.cell(r, c).value for c in range(1, 12)]
@@ -90,7 +103,7 @@ def parse_stock(file_obj) -> dict:
     if raw_sheet_info is not None:
         sheet_name, header_row = raw_sheet_info
         ws = wb[sheet_name]
-        header = [ws.cell(header_row, c).value for c in range(1, 8)]
+        header = [ws.cell(header_row, c).value for c in range(1, RAW_SCAN_COLS + 1)]
         wh_col = header.index("Warehouse_Name") + 1
         name_col = header.index("Item_Name") + 1
         qty_col = header.index("Qty Total") + 1

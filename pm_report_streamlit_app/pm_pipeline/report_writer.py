@@ -297,11 +297,16 @@ def write_shortfall_sheet(wb, consolidated, WEEKS, WEEK_BOUNDS, nav_map):
     qty_style = _style_ref(ws, 3, 5)[5]
     dash_style = _style_ref(ws, 3, 6)[6]
 
+    # Shortfall Weeks shows the full reporting window; PO to Issue by is
+    # capped at 8 weeks regardless of how many weeks Shortfall covers -
+    # issuing a PO more than 8 weeks out isn't actionable yet. PO to Arrive
+    # is no longer shown at all.
     NW = len(WEEKS)
+    ISSUE_WEEKS = WEEKS[:8]
+    ISSUE_NW = len(ISSUE_WEEKS)
     SF_START = 8
     ISSUE_START = SF_START + NW
-    ARRIVE_START = ISSUE_START + NW
-    NEW_MAX_COL = ARRIVE_START + NW - 1
+    NEW_MAX_COL = ISSUE_START + ISSUE_NW - 1
 
     for rng in list(ws.merged_cells.ranges):
         ws.unmerge_cells(str(rng))
@@ -313,12 +318,11 @@ def write_shortfall_sheet(wb, consolidated, WEEKS, WEEK_BOUNDS, nav_map):
             cell.font, cell.border = openpyxl.styles.Font(), openpyxl.styles.Border()
 
     # Each block gets its own solid color (theme-based, "Darker 25%" tint) so
-    # the three week-blocks are distinguishable at a glance, matching the
+    # the week-blocks are distinguishable at a glance, matching the
     # reference report's palette.
     BLOCK_THEMES = {
         "sf":     {"title": "FF1F4E78", "week": openpyxl.styles.colors.Color(theme=5, tint=-0.249977111117893)},
         "issue":  {"title": "FF375623", "week": openpyxl.styles.colors.Color(theme=7, tint=-0.249977111117893)},
-        "arrive": {"title": "FFC00000", "week": openpyxl.styles.colors.Color(theme=8, tint=-0.249977111117893)},
     }
     head_fill = openpyxl.styles.PatternFill("solid", fgColor="FF1F4E78")
     head_font = openpyxl.styles.Font(bold=True, color="FFFFFFFF")
@@ -336,22 +340,22 @@ def write_shortfall_sheet(wb, consolidated, WEEKS, WEEK_BOUNDS, nav_map):
         c.font, c.alignment = title_font, center
 
     block_title("Shortfall Weeks", SF_START, SF_START + NW - 1, "sf")
-    block_title("PO to Issue by", ISSUE_START, ISSUE_START + NW - 1, "issue")
-    block_title("PO to Arrive", ARRIVE_START, ARRIVE_START + NW - 1, "arrive")
+    block_title("PO to Issue by", ISSUE_START, ISSUE_START + ISSUE_NW - 1, "issue")
 
     for i, h in enumerate(["Nav Item Code", "Item Name", "Item Type", "Item Category",
                             "Current Stock", "Shortfall Quantity", "Suggested MOQ"], start=1):
         c = ws.cell(2, i); c.value = h; c.fill, c.font, c.alignment = head_fill, head_font, center
     for i, w in enumerate(WEEKS):
-        for base, theme_key in ((SF_START, "sf"), (ISSUE_START, "issue"), (ARRIVE_START, "arrive")):
-            fill = openpyxl.styles.PatternFill("solid", fgColor=BLOCK_THEMES[theme_key]["week"])
-            c = ws.cell(2, base + i); c.value = f"Week {w}"; c.fill, c.font, c.alignment = fill, head_font, center
+        fill = openpyxl.styles.PatternFill("solid", fgColor=BLOCK_THEMES["sf"]["week"])
+        c = ws.cell(2, SF_START + i); c.value = f"Week {w}"; c.fill, c.font, c.alignment = fill, head_font, center
+    for i, w in enumerate(ISSUE_WEEKS):
+        fill = openpyxl.styles.PatternFill("solid", fgColor=BLOCK_THEMES["issue"]["week"])
+        c = ws.cell(2, ISSUE_START + i); c.value = f"Week {w}"; c.fill, c.font, c.alignment = fill, head_font, center
 
     ws.column_dimensions[get_column_letter(SF_START)].width = 7.21875
 
     SF_COLS = {w: SF_START + i for i, w in enumerate(WEEKS)}
-    ISSUE_COLS = {w: ISSUE_START + i for i, w in enumerate(WEEKS)}
-    ARRIVE_COLS = {w: ARRIVE_START + i for i, w in enumerate(WEEKS)}
+    ISSUE_COLS = {w: ISSUE_START + i for i, w in enumerate(ISSUE_WEEKS)}
 
     def apply(cell, style):
         cell.font, cell.fill, cell.border, cell.alignment = style["font"], style["fill"], style["border"], style["alignment"]
@@ -380,15 +384,9 @@ def write_shortfall_sheet(wb, consolidated, WEEKS, WEEK_BOUNDS, nav_map):
             else:
                 set_dash(cell)
 
+        for w in ISSUE_WEEKS:
             cell = ws.cell(row_idx, ISSUE_COLS[w])
             qty = r["issue_by"].get(w)
-            if qty is not None:
-                cell.value = round(qty, 4); apply(cell, qty_style)
-            else:
-                set_dash(cell)
-
-            cell = ws.cell(row_idx, ARRIVE_COLS[w])
-            qty = r["arrive_by"].get(w)
             if qty is not None:
                 cell.value = round(qty, 4); apply(cell, qty_style)
             else:

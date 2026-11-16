@@ -70,7 +70,7 @@ def run_cascade(pm_items, stock, total_pending, pending_delivery_by_item, planne
     return results
 
 
-def consolidate_shortfall(results, buckets, issue_lead=6, arrive_lead=2):
+def consolidate_shortfall(results, buckets, issue_lead=6):
     """
     One row per item that has a shortfall somewhere in the window.
 
@@ -96,20 +96,24 @@ def consolidate_shortfall(results, buckets, issue_lead=6, arrive_lead=2):
         total_shortfall = sum(bucket_shortfalls.values())
         moq = suggested_moq(v["category"], v["name"], total_shortfall)
 
-        # only meaningful for week-number buckets (integers), not month tuples
-        issue_by, arrive_by = {}, {}
+        # only meaningful for week-number buckets (integers), not month tuples.
+        # Looked up by each bucket's position in the list, not by subtracting
+        # issue_lead from its raw number - week numbers reset to 1 at each
+        # new year (see weeks.py), so a window that spans a reset can't be
+        # treated as one continuously increasing sequence of integers.
+        issue_by = {}
         if buckets and isinstance(buckets[0], int):
+            pos = {b: i for i, b in enumerate(buckets)}
             for b, qty in bucket_shortfalls.items():
-                issue_w = b - issue_lead
-                if issue_w >= buckets[0]:
-                    issue_by[issue_w] = qty
-                    arrive_by[issue_w + arrive_lead] = qty
+                issue_i = pos[b] - issue_lead
+                if issue_i >= 0:
+                    issue_by[buckets[issue_i]] = qty
 
         consolidated.append({
             "name": v["name"], "item_type": v["item_type"], "category": v["category"],
             "current_stock": v["current_stock"],
             "total_shortfall": total_shortfall, "suggested_moq": moq,
             "bucket_shortfalls": bucket_shortfalls,
-            "issue_by": issue_by, "arrive_by": arrive_by,
+            "issue_by": issue_by,
         })
     return consolidated

@@ -101,13 +101,20 @@ def consolidate_shortfall(results, buckets, issue_lead=6):
         # issue_lead from its raw number - week numbers reset to 1 at each
         # new year (see weeks.py), so a window that spans a reset can't be
         # treated as one continuously increasing sequence of integers.
+        #
+        # A shortfall whose natural issue-by week already fell before the
+        # report's first week (the PO should've gone out already) isn't
+        # dropped - it's pulled forward into the current week instead, so
+        # Total PO to Issue across the window always equals the item's total
+        # Shortfall Quantity. Several such overdue shortfalls can land on the
+        # same clamped week, so amounts are summed, not overwritten.
         issue_by = {}
         if buckets and isinstance(buckets[0], int):
             pos = {b: i for i, b in enumerate(buckets)}
             for b, qty in bucket_shortfalls.items():
-                issue_i = pos[b] - issue_lead
-                if issue_i >= 0:
-                    issue_by[buckets[issue_i]] = qty
+                issue_i = max(pos[b] - issue_lead, 0)
+                issue_w = buckets[issue_i]
+                issue_by[issue_w] = issue_by.get(issue_w, 0.0) + qty
 
         consolidated.append({
             "name": v["name"], "item_type": v["item_type"], "category": v["category"],
